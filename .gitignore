@@ -1,0 +1,6 @@
+expected/*
+results/*
+src/*.so
+src/*.o
+data/*.pgn
+data/*.bz2
