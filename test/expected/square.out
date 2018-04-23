@@ -1,6 +1,8 @@
 create extension chess_index;
 ERROR:  extension "chess_index" already exists
 --fail
+\echo 'fail'
+fail
 select 'a0'::square;
 ERROR:  invalid input syntax for square: "a0"
 LINE 1: select 'a0'::square;
@@ -17,14 +19,88 @@ select 'i1'::square;
 ERROR:  invalid input syntax for square: "i1"
 LINE 1: select 'i1'::square;
                ^
---succeed
+select 'a1'::square = 'b1'::square;
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'b1'::square < 'a2'::square;
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'b1'::square <= 'a1'::square;
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'a1'::square > 'b2'::square;
+ ?column? 
+----------
+ f
+(1 row)
+
+select 'a1'::square >= 'b2'::square;
+ ?column? 
+----------
+ f
+(1 row)
+
+\echo 'succeed'
+succeed
 select 'a1'::square;
  square 
 --------
  a1
 (1 row)
 
--- no rows
+select 'a1'::square = 'a1'::square;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'b1'::square > 'a2'::square;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'a1'::square >= 'a1'::square;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'b1'::square >= 'a2'::square;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'a1'::square < 'a2'::square;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'a1'::square <= 'a1'::square;
+ ?column? 
+----------
+ t
+(1 row)
+
+select 'a1'::square <= 'a2'::square;
+ ?column? 
+----------
+ t
+(1 row)
+
+\echo 'norows'
+norows
 select a  from (select a,a = square_to_int(int_to_square(a)) as t from generate_series(0, 63) as a) as tt where t=false;
  a 
 ---

@@ -131,8 +131,9 @@ CREATE OPERATOR CLASS hash_square_ops
         FUNCTION        1       hash_square(square);
 
 
------------------------------------------------------------------------------
+/****************************************************************************
 -- piece
+****************************************************************************/
 
 CREATE FUNCTION piece_in(cstring)
 RETURNS piece
@@ -154,5 +155,52 @@ CREATE TYPE piece(
 	PASSEDBYVALUE           -- pass data by value rather than by reference
 );
 
+CREATE FUNCTION piece_eq(piece, piece)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'chareq';
+CREATE FUNCTION piece_ne(piece, piece)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'charne';
+
+CREATE OPERATOR = (
+    LEFTARG = piece,
+    RIGHTARG = piece,
+    PROCEDURE = piece_eq,
+    COMMUTATOR = '=',
+    NEGATOR = '<>',
+    RESTRICT = eqsel,
+    JOIN = eqjoinsel,
+    HASHES, MERGES
+);
+
+CREATE OPERATOR <> (
+    LEFTARG = piece,
+    RIGHTARG = piece,
+    PROCEDURE = piece_ne,
+    COMMUTATOR = '<>',
+    NEGATOR = '=',
+    RESTRICT = neqsel,
+    JOIN = neqjoinsel
+);
+
+
+/****************************************************************************
+-- board
+ ****************************************************************************/
+
+CREATE FUNCTION board_in(cstring)
+RETURNS board
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION board_out(board)
+RETURNS cstring
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE TYPE board(
+    INPUT          = board_in,
+    OUTPUT         = board_out,
+    ALIGNMENT      = int4,  -- align to 4 bytes
+    STORAGE        = PLAIN  -- always store data inline uncompressed (not toasted)
+);
 
 
