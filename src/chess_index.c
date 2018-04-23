@@ -83,6 +83,8 @@ PG_FUNCTION_INFO_V1(chess_cmp_gteq);
 
 PG_FUNCTION_INFO_V1(square_in);
 PG_FUNCTION_INFO_V1(square_out);
+PG_FUNCTION_INFO_V1(square_to_int);
+PG_FUNCTION_INFO_V1(int_to_square);
 
 PG_FUNCTION_INFO_V1(piece_in);
 PG_FUNCTION_INFO_V1(piece_out);
@@ -138,20 +140,12 @@ _cmp_internal(int a, int b)
     return 0;
 }
 
-Datum
-chess_cmp(PG_FUNCTION_ARGS)
-{
-    int			a = (int) PG_GETARG_INT32(0);
-    int			b = (int) PG_GETARG_INT32(1);
-
-    PG_RETURN_INT32(_cmp_internal(a, b));
-}
 
 Datum
 chess_cmp_eq(PG_FUNCTION_ARGS)
 {
-    int			a = (int) PG_GETARG_INT32(0);
-    int			b = (int) PG_GETARG_INT32(1);
+    char    	a = PG_GETARG_CHAR(0);
+    char    	b = PG_GETARG_CHAR(1);
 
     PG_RETURN_BOOL(_cmp_internal(a, b) == 0);
 }
@@ -312,7 +306,7 @@ static char _square_in(char file, char rank)
 {
 	char			c=0;
 
-	if (file < 'a' || file > 'f') 
+	if (file < 'a' || file > 'h') 
 		BAD_TYPE_IN(TYPE_SQUARE, _make_str_square(file, rank));
 	else if (rank < '1' ||  rank > '8')
 		BAD_TYPE_IN(TYPE_SQUARE, _make_str_square(file, rank));
@@ -326,6 +320,7 @@ static char _square_in(char file, char rank)
 
 static void _square_out(char c, char *str)
 {
+
 	if (c < 0 || c > 63)
 		BAD_TYPE_OUT(TYPE_SQUARE, c);
 
@@ -363,8 +358,7 @@ square_in(PG_FUNCTION_ARGS)
 	char 			*str = PG_GETARG_CSTRING(0);
 
 	if (strlen(str) != 2)
-		BAD_TYPE_IN(TYPE_SQUARE, str);
-
+		BAD_TYPE_IN(TYPE_SQUARE, str); 
 
 	PG_RETURN_CHAR(_square_in(str[0], str[1]));
 }
@@ -380,6 +374,28 @@ square_out(PG_FUNCTION_ARGS)
 	result[2] = '\0';
 
 	PG_RETURN_CSTRING(result);
+}
+
+Datum
+square_to_int(PG_FUNCTION_ARGS)
+{
+    char			square = PG_GETARG_CHAR(0);
+    PG_RETURN_INT32((int32)square);
+}
+
+Datum
+int_to_square(PG_FUNCTION_ARGS)
+{
+    char            c = (char)PG_GETARG_INT32(0);
+    char			*result = (char *) palloc(3);
+
+    if (c < 0 || c > 63)
+        ERROR1("value must be in between 0 and 63");
+    PG_RETURN_CHAR(c);
+
+    _square_out(c, result);
+    result[2] = '\0';
+    PG_RETURN_CSTRING(result);
 }
 
 

@@ -1,0 +1,32 @@
+create extension chess_index;
+ERROR:  extension "chess_index" already exists
+--fail
+select 'a0'::square;
+ERROR:  invalid input syntax for square: "a0"
+LINE 1: select 'a0'::square;
+               ^
+select 'a9'::square;
+ERROR:  invalid input syntax for square: "a9"
+LINE 1: select 'a9'::square;
+               ^
+select 'A8'::square;
+ERROR:  invalid input syntax for square: "A8"
+LINE 1: select 'A8'::square;
+               ^
+select 'i1'::square;
+ERROR:  invalid input syntax for square: "i1"
+LINE 1: select 'i1'::square;
+               ^
+--succeed
+select 'a1'::square;
+ square 
+--------
+ a1
+(1 row)
+
+-- no rows
+select a  from (select a,a = square_to_int(int_to_square(a)) as t from generate_series(0, 63) as a) as tt where t=false;
+ a 
+---
+(0 rows)
+

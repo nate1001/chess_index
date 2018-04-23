@@ -1,16 +1,14 @@
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 
---\echo Use "CREATE EXTENSION chess_index" to load this file. \quit
+\echo Use "CREATE EXTENSION chess_index" to load this file. \quit
 
 
-drop FUNCTION if exists square_in(cstring) cascade;
 CREATE FUNCTION square_in(cstring)
 RETURNS square
 AS '$libdir/chess_index'
 LANGUAGE C IMMUTABLE STRICT;
 
-drop FUNCTION if exists square_out(square);
 CREATE FUNCTION square_out(square)
 RETURNS cstring
 AS '$libdir/chess_index'
@@ -27,13 +25,120 @@ CREATE TYPE square(
 
 );
 
-drop FUNCTION if exists piece_in(cstring) cascade;
+CREATE FUNCTION square_to_int(square)
+RETURNS int4
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+CREATE CAST (square AS int4) WITH FUNCTION square_to_int(square);
+
+CREATE FUNCTION int_to_square(int4)
+RETURNS square
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+CREATE CAST (int4 AS square) WITH FUNCTION int_to_square(int4);
+
+CREATE FUNCTION square_eq(square, square)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'chareq';
+CREATE FUNCTION square_ne(square, square)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'charne';
+CREATE FUNCTION square_lt(square, square)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'charlt';
+CREATE FUNCTION square_le(square, square)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'charle';
+CREATE FUNCTION square_gt(square, square)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'chargt';
+CREATE FUNCTION square_ge(square, square)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'charge';
+CREATE FUNCTION square_cmp(square, square)
+RETURNS integer LANGUAGE internal IMMUTABLE AS 'btcharcmp';
+CREATE FUNCTION hash_square(square)
+RETURNS integer LANGUAGE internal IMMUTABLE AS 'hashchar';
+
+CREATE OPERATOR = (
+  LEFTARG = square,
+  RIGHTARG = square,
+  PROCEDURE = square_eq,
+  COMMUTATOR = '=',
+  NEGATOR = '<>',
+  RESTRICT = eqsel,
+  JOIN = eqjoinsel,
+  HASHES, MERGES
+);
+
+CREATE OPERATOR <> (
+  LEFTARG = square,
+  RIGHTARG = square,
+  PROCEDURE = square_ne,
+  COMMUTATOR = '<>',
+  NEGATOR = '=',
+  RESTRICT = neqsel,
+  JOIN = neqjoinsel
+);
+
+CREATE OPERATOR < (
+  LEFTARG = square,
+  RIGHTARG = square,
+  PROCEDURE = square_lt,
+  COMMUTATOR = > ,
+  NEGATOR = >= ,
+  RESTRICT = scalarltsel,
+  JOIN = scalarltjoinsel
+);
+
+CREATE OPERATOR <= (
+  LEFTARG = square,
+  RIGHTARG = square,
+  PROCEDURE = square_le,
+  COMMUTATOR = >= ,
+  NEGATOR = > ,
+  RESTRICT = scalarltsel,
+  JOIN = scalarltjoinsel
+);
+
+CREATE OPERATOR > (
+  LEFTARG = square,
+  RIGHTARG = square,
+  PROCEDURE = square_gt,
+  COMMUTATOR = < ,
+  NEGATOR = <= ,
+  RESTRICT = scalargtsel,
+  JOIN = scalargtjoinsel
+);
+
+CREATE OPERATOR >= (
+  LEFTARG = square,
+  RIGHTARG = square,
+  PROCEDURE = square_ge,
+  COMMUTATOR = <= ,
+  NEGATOR = < ,
+  RESTRICT = scalargtsel,
+  JOIN = scalargtjoinsel
+);
+
+CREATE OPERATOR CLASS btree_square_ops
+DEFAULT FOR TYPE square USING btree
+AS
+        OPERATOR        1       <  ,
+        OPERATOR        2       <= ,
+        OPERATOR        3       =  ,
+        OPERATOR        4       >= ,
+        OPERATOR        5       >  ,
+        FUNCTION        1       square_cmp(square, square);
+
+CREATE OPERATOR CLASS hash_square_ops
+    DEFAULT FOR TYPE square USING hash AS
+        OPERATOR        1       = ,
+        FUNCTION        1       hash_square(square);
+
+
+-----------------------------------------------------------------------------
+-- piece
+
 CREATE FUNCTION piece_in(cstring)
 RETURNS piece
 AS '$libdir/chess_index'
 LANGUAGE C IMMUTABLE STRICT;
 
-drop FUNCTION if exists piece_out(piece);
 CREATE FUNCTION piece_out(piece)
 RETURNS cstring
 AS '$libdir/chess_index'
@@ -48,5 +153,6 @@ CREATE TYPE piece(
 	STORAGE        = PLAIN, -- always store data inline uncompressed (not toasted)
 	PASSEDBYVALUE           -- pass data by value rather than by reference
 );
+
 
 
