@@ -1,7 +1,9 @@
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 
---\echo Use "CREATE EXTENSION chess_index" to load this file. \quit
+\echo Use "CREATE EXTENSION chess_index" to load this file. \quit
+
+-- set client_min_messages=DEBUG5;
 
 
 CREATE FUNCTION square_in(cstring)

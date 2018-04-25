@@ -14,7 +14,7 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 
-//#define DEBUG
+//#define EXTRA_DEBUG 1
 
 PG_FUNCTION_INFO_V1(char_to_int);
 
@@ -52,12 +52,15 @@ PG_FUNCTION_INFO_V1(adiagonal_in);
 PG_FUNCTION_INFO_V1(adiagonal_out);
 PG_FUNCTION_INFO_V1(square_to_adiagonal);
 
+static char *_square_out(char c, char *str);
+
 #define CHECK_BIT(board, k) ((1ul << k) & board)
 #define GET_PIECE(pieces, k) k%2 ? pieces[k/2] & 0x0f : (pieces[k/2] & 0xf0) >> 4
 #define SET_PIECE(pieces, k, v) pieces[k/2] = k%2 ? ( (pieces[k/2] & 0xF0) | (v & 0xF)) : ((pieces[k/2] & 0x0F) | (v & 0xF) << 4)
 #define TO_SQUARE_IDX(i)  (i/8)*8 + (8 - i%8) - 1;
 #define CHAR_CFILE(s) 'a' + _square_to_cfile(s)
 #define CHAR_RANK(s) '1' + _square_to_rank(s)
+#define MAKE_SQUARE(file, rank, str) {str[0]=file; str[1]=rank;}
 
 
 #define MAX_FEN 100
@@ -98,15 +101,13 @@ typedef struct {
 PG_MODULE_MAGIC;
 #endif
 
-#define NOTICE1(msg) ereport(NOTICE, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("%s", msg)))
-#define NOTICE2(msg, arg) ereport(NOTICE, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(msg, arg)))
-#define NOTICE3(msg, arg1, arg2) ereport(NOTICE, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(msg, arg1, arg2)))
-#define NOTICE4(msg, arg1, arg2, arg3) ereport(NOTICE, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(msg, arg1, arg2, arg3)))
-
-#define ERROR1(msg) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg("%s", msg)))
-#define ERROR2(msg, arg) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(msg, arg)))
-#define ERROR3(msg, arg1, arg2) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(msg, arg1, arg2)))
-#define ERROR4(msg, arg1, arg2, arg3) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(msg, arg1, arg2, arg3)))
+#define CH_NOTICE(...) ereport(NOTICE, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
+#define CH_ERROR(...) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
+#define CH_DEBUG5(...) ereport(DEBUG5, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__))) // most detail
+#define CH_DEBUG4(...) ereport(DEBUG4, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
+#define CH_DEBUG3(...) ereport(DEBUG3, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
+#define CH_DEBUG2(...) ereport(DEBUG2, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
+#define CH_DEBUG1(...) ereport(DEBUG1, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__))) // least detail
 
 #define BAD_TYPE_IN(type, input) ereport( \
 			ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), \
@@ -179,8 +180,8 @@ static ArrayType * make_array( char *typname, size_t size, Datum * data)
 }
 
 */
-#ifdef DEBUG
 
+#ifdef EXTRA_DEBUG
 static void debug_bitboard(int64 a) {
 
     char            *str = (char *) palloc(BOARD_SIZE+1);
@@ -194,7 +195,7 @@ static void debug_bitboard(int64 a) {
 	     cnt--;
 	}
 	str[BOARD_SIZE] = '\0';
-	NOTICE3("bitboard: %ld: |%s|", a, str);
+	CH_DEBUG5("bitboard: %ld: |%s|", a, str);
 }
 #endif
  
@@ -217,7 +218,7 @@ static char _square_to_cfile(char s)
 static char _cfile_in(char f) 
 {
     if (f < 'a' || f > 'h') 
-        ERROR2("chess file not in range %c", f);
+        CH_ERROR("chess file not in range %c", f);
     return f - 'a';
 }
 
@@ -262,7 +263,7 @@ static char _square_to_rank(char s)
 static char _rank_in(char r) 
 {
     if (r < '1' || r > '8') 
-        ERROR2("chess rank '%c' not in range", r);
+        CH_ERROR("chess rank '%c' not in range", r);
     return r - '1';
 }
 
@@ -299,41 +300,43 @@ rank_out(PG_FUNCTION_ARGS)
  * 		square
  ********************************************************/
 
-// XXX need to pfree
-static char *_square_out_str(char file, char rank) 
-{
-    char *msg = (char *) palloc(3);
-    msg[0] = file;
-    msg[1] = rank;
-    msg[2] = '\0';
-    return msg;
-}
-
 static char _square_in(char file, char rank)
 {
     char			c=0;
+    char            square[] = "..";
 
     if (file < 'a' || file > 'h') {
-        BAD_TYPE_IN("square", _square_out_str(file, rank));
+        MAKE_SQUARE(file, rank, square)
+        BAD_TYPE_IN("square", square);
+    }
+    if (rank < '1' ||  rank > '8') {
+        MAKE_SQUARE(file, rank, square)
+        BAD_TYPE_IN("square", square);
     }
 
-    else if (rank < '1' ||  rank > '8')
-        BAD_TYPE_IN("square", _square_out_str(file, rank));
+    c = (file - 'a') + ( 8 * (rank - '1'));
 
-    c = ((file - 'a') * 8) + (rank - '1');
+    CH_DEBUG5("_square_in: file:%c rank:%c char:%i", file, rank, c);
+#ifdef EXTRA_DEBUG
+    CH_DEBUG5("_square_in char of file rank: %c%c:", CHAR_CFILE(c), CHAR_RANK(c));
+    CH_DEBUG5("c file:%i c rank:%i", _square_to_cfile(c), _square_to_rank(c));
+    CH_DEBUG5("file - 'a':%i rank-'1':%i", file -'a', rank-'1');
+#endif
 
-    if (c < 0 || c > 63)
-        ERROR2("bad conversion for square %s" , _square_out_str(file, rank));
+    if (c < 0 || c > 63) {
+        MAKE_SQUARE(file, rank, square);
+        CH_ERROR("bad conversion for square %s" ,square);
+    }
     return c;
 }
 
-static void _square_out(char c, char *str)
+static char *_square_out(char c, char *str)
 {
 
     if (c < 0 || c > 63)
         BAD_TYPE_OUT("square", c);
 
-    switch (c / 8) {
+    switch (c % 8) {
         case 0: str[0]='a'; break;
         case 1: str[0]='b'; break;
         case 2: str[0]='c'; break;
@@ -343,10 +346,10 @@ static void _square_out(char c, char *str)
         case 6: str[0]='g'; break;
         case 7: str[0]='h'; break;
 
-        default: ERROR2("bad switch statement %d", c);
+        default: CH_ERROR("bad switch statement %d", c);
     }
 
-    switch (c % 8) {
+    switch (c / 8) {
         case 0: str[1]='1'; break;
         case 1: str[1]='2'; break;
         case 2: str[1]='3'; break;
@@ -356,8 +359,9 @@ static void _square_out(char c, char *str)
         case 6: str[1]='7'; break;
         case 7: str[1]='8'; break;
 
-        default: ERROR2("bad switch statement %d", c);
+        default: CH_ERROR("bad switch statement %d", c);
     }
+    return str;
 }
 
 
@@ -392,7 +396,7 @@ int_to_square(PG_FUNCTION_ARGS)
     char			*result = (char *) palloc(3);
 
     if (c < 0 || c > 63)
-        ERROR1("value must be in between 0 and 63");
+        CH_ERROR("value must be in between 0 and 63");
     PG_RETURN_CHAR(c);
 
     _square_out(c, result);
@@ -512,7 +516,7 @@ static char _diagonal_in(char square)
         case 64:
             d = 7; break;
         default:
-            ERROR2("bad square %d for diagonal", square);
+            CH_ERROR("bad square %d for diagonal", square);
             break;
     }
     return d;
@@ -604,7 +608,7 @@ static char _adiagonal_in(char square)
         case 8:
             d = 7; break;
         default:
-            ERROR2("bad square %d for adiagonal", square);
+            CH_ERROR("bad square %d for adiagonal", square);
             break;
     }
     return d;
@@ -680,7 +684,7 @@ fen_in(PG_FUNCTION_ARGS)
 
 
     if (strlen(str) > MAX_FEN)
-        ERROR1("fen string too long");
+        CH_ERROR("fen string too long");
     memset(pieces, 0, MAX_PIECES);
 
     // fast forward to move side
@@ -691,7 +695,7 @@ fen_in(PG_FUNCTION_ARGS)
     switch (str[i++]) {
         case 'w': whitesgo=true; break;
         case 'b': whitesgo=false; break;
-        default: ERROR1("bad move side in fen"); break;
+        default: CH_ERROR("bad move side in fen"); break;
     }
     i++;
     while (str[i] != '\0' && str[i] != ' ') {
@@ -701,22 +705,25 @@ fen_in(PG_FUNCTION_ARGS)
             case 'k': bk=true; break;
             case 'q': bq=true; break;
             case '-': break;
-            default: ERROR1("bad castle availability in fen"); break;
+            default: CH_ERROR("bad castle availability in fen"); break;
         }
     }
     c = str[++i];
     if (c >= 'a' && c <= 'f') {
         p = str[++i];
         if (p != '3' && p != '6')
-            ERROR2("bad enpassant rank in fen '%c'", p);
+            CH_ERROR("bad enpassant rank in fen '%c'", p);
         enpassant = _square_in(c, p);
+
+        CH_DEBUG5("_fen_in: enpessant: %c%c:", CHAR_CFILE(enpassant), CHAR_RANK(enpassant));
+
         // enpassant is set on the capture not on the pawn
         // so we have have to go up a rank to find the pawn
-        enpassant += (p=='4' ? 8 : -8);
+        enpassant += (p=='3' ? 8 : -8);
 
     } else if (c=='-') {
     } else {
-        ERROR2("bad enpassant in fen '%c'", enpassant);
+        CH_ERROR("bad enpassant in fen '%c'", enpassant);
     }
 
     i = 0;
@@ -738,9 +745,7 @@ fen_in(PG_FUNCTION_ARGS)
             case 'K':
                 // i indexes differently than square type (for enpassant)
                 s = TO_SQUARE_IDX(j);
-#ifdef DEBUG
-                NOTICE4("_fen_in: :square: %c%c: str[i]:%c", CHAR_CFILE(s), CHAR_RANK(s), str[i]);
-#endif
+                CH_DEBUG5("_fen_in: :square: %c%c: str[i]:%c", CHAR_CFILE(s), CHAR_RANK(s), str[i]);
                 bitboard |= (1Ul << (j--));
                 if (s==enpassant) {
                     epfound = true;
@@ -749,7 +754,7 @@ fen_in(PG_FUNCTION_ARGS)
                     else if (str[i] == 'P')
                         p = WHITE_SPECIAL;
                     else
-                        ERROR3("no pawn found for enpassant at %c%c", CHAR_CFILE(s), CHAR_RANK(s));
+                        CH_ERROR("no pawn found for enpassant at %c%c", CHAR_CFILE(s), CHAR_RANK(s));
                 } else {
                 // second switch for pieces
                     switch (c=str[i]) {
@@ -771,7 +776,7 @@ fen_in(PG_FUNCTION_ARGS)
                 SET_PIECE(pieces, k, p);
                 k++;
                 if (k>MAX_PIECES)
-                    ERROR1("too many pieces in fen");
+                    CH_ERROR("too many pieces in fen");
                 break;
             case '1':
             case '2':
@@ -795,18 +800,18 @@ fen_in(PG_FUNCTION_ARGS)
         if (done) 
             break;
         if (j<-1)
-            ERROR1("FEN board is too long");
+            CH_ERROR("FEN board is too long");
     }
 
     if (j>-1)
-        ERROR1("FEN board is too short");
+        CH_ERROR("FEN board is too short");
 
-#ifdef DEBUG
+#ifdef EXTRA_DEBUG
     debug_bitboard(bitboard);
 #endif
 
     if (enpassant != -1 && !epfound)
-        ERROR3("en passant set for %c%c but no pawn was found", CHAR_CFILE(enpassant), CHAR_RANK(enpassant));
+        CH_ERROR("en passant set for %c%c but no pawn was found", CHAR_CFILE(enpassant), CHAR_RANK(enpassant));
 
     s1 = k/2 + k%2 ; // pieces size
     //  bitboard            length
@@ -836,7 +841,7 @@ fen_out(PG_FUNCTION_ARGS)
     char            enpassant=-1, whitesgo=-1;
 
 
-#ifdef DEBUG
+#ifdef EXTRA_DEBUG
     debug_bitboard(b->board);
 #endif
 
@@ -845,9 +850,7 @@ fen_out(PG_FUNCTION_ARGS)
         // need for square type
         s = TO_SQUARE_IDX(i);
 
-#ifdef DEBUG
-        NOTICE3("_fen_out: :square: %c%c", CHAR_CFILE(s), CHAR_RANK(s));
-#endif
+        CH_DEBUG5("_fen_out: :square: %c%c", CHAR_CFILE(s), CHAR_RANK(s));
 
         // if its an empty square
         if (!CHECK_BIT(b->board, i)) {
@@ -884,7 +887,7 @@ fen_out(PG_FUNCTION_ARGS)
                                     case 0: wq=true; break;
                                     case 7: wk=true; break;
                                     default: 
-                                        ERROR2("bad file for white castle: %c", _square_to_cfile(s));
+                                        CH_ERROR("bad file for white castle: %c", _square_to_cfile(s));
                                         break;
                                 }
                           // if its a en passant special
@@ -892,7 +895,7 @@ fen_out(PG_FUNCTION_ARGS)
                               enpassant = s;
                               str[j++] = 'P';
                           } else {
-                              ERROR3("bad internal 'white special' at %c%c", CHAR_CFILE(s), CHAR_RANK(s));
+                              CH_ERROR("bad internal 'white special' at %c%c", CHAR_CFILE(s), CHAR_RANK(s));
                           }
                           break;
                 case BLACK_SPECIAL:
@@ -903,7 +906,7 @@ fen_out(PG_FUNCTION_ARGS)
                                   case 0: bq=true; break;
                                   case 7: bk=true; break;
                                   default: 
-                                          ERROR2("bad file for black castle: %c", _square_to_cfile(s));
+                                          CH_ERROR("bad file for black castle: %c", _square_to_cfile(s));
                                           break;
                               }
                               // if its a en passant special
@@ -911,7 +914,7 @@ fen_out(PG_FUNCTION_ARGS)
                               enpassant = s;
                               str[j++] = 'p';
                           } else {
-                              ERROR3("bad internal 'black special' at %c%c", CHAR_CFILE(s), CHAR_RANK(s));
+                              CH_ERROR("bad internal 'black special' at %c%c", CHAR_CFILE(s), CHAR_RANK(s));
                           }
                           break;
 
@@ -934,7 +937,7 @@ fen_out(PG_FUNCTION_ARGS)
     else if (whitesgo==1)
         str[j++] = 'w';
     else
-        ERROR1("side to move not found");
+        CH_ERROR("side to move not found");
 
     str[j++] = ' ';
     if (wk + wq + bk + bq > 0) {
