@@ -1,7 +1,7 @@
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 
-\echo Use "CREATE EXTENSION chess_index" to load this file. \quit
+--\echo Use "CREATE EXTENSION chess_index" to load this file. \quit
 
 
 CREATE FUNCTION square_in(cstring)
@@ -18,18 +18,19 @@ CREATE TYPE square(
   INPUT          = square_in,
   OUTPUT         = square_out,
   LIKE           = char,
-	INTERNALLENGTH = 1,     -- use 4 bytes to store data
-	ALIGNMENT      = char,  -- align to 4 bytes
-	STORAGE        = PLAIN, -- always store data inline uncompressed (not toasted)
-	PASSEDBYVALUE           -- pass data by value rather than by reference
+	INTERNALLENGTH = 1, 
+	ALIGNMENT      = char,
+	STORAGE        = PLAIN,
+	PASSEDBYVALUE         
 
 );
 
-CREATE FUNCTION square_to_int(square)
+CREATE FUNCTION char_to_int(square)
 RETURNS int4
 AS '$libdir/chess_index'
 LANGUAGE C IMMUTABLE STRICT;
-CREATE CAST (square AS int4) WITH FUNCTION square_to_int(square);
+CREATE CAST (square AS int4) WITH FUNCTION char_to_int(square);
+
 
 CREATE FUNCTION int_to_square(int4)
 RETURNS square
@@ -183,24 +184,177 @@ CREATE OPERATOR <> (
 
 
 /****************************************************************************
--- board
+-- fen
  ****************************************************************************/
 
-CREATE FUNCTION board_in(cstring)
-RETURNS board
+CREATE FUNCTION fen_in(cstring)
+RETURNS fen
 AS '$libdir/chess_index'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION board_out(board)
+CREATE FUNCTION fen_out(fen)
 RETURNS cstring
 AS '$libdir/chess_index'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE TYPE board(
-    INPUT          = board_in,
-    OUTPUT         = board_out,
-    ALIGNMENT      = int4,  -- align to 4 bytes
-    STORAGE        = PLAIN  -- always store data inline uncompressed (not toasted)
+CREATE TYPE fen(
+    INPUT          = fen_in,
+    OUTPUT         = fen_out,
+    ALIGNMENT      = int4,
+    STORAGE        = PLAIN
 );
+
+/****************************************************************************
+-- file
+ ****************************************************************************/
+
+CREATE FUNCTION cfile_in(cstring)
+RETURNS cfile 
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION cfile_out(cfile)
+RETURNS cstring
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE TYPE cfile(
+    INPUT          = cfile_in,
+    OUTPUT         = cfile_out,
+
+    INTERNALLENGTH = 1,     
+    ALIGNMENT      = char, 
+    STORAGE        = PLAIN, -- always store data inline uncompressed (not toasted)
+    PASSEDBYVALUE           -- pass data by value rather than by reference
+);
+
+
+CREATE FUNCTION square_to_cfile(square)
+RETURNS cfile
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+CREATE CAST (square AS cfile) WITH FUNCTION square_to_cfile(square);
+
+CREATE FUNCTION char_to_int(cfile)
+RETURNS int4
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+CREATE CAST (cfile AS int4) WITH FUNCTION char_to_int(cfile);
+
+
+/****************************************************************************
+-- rank
+ ****************************************************************************/
+
+CREATE FUNCTION rank_in(cstring)
+RETURNS rank
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION rank_out(rank)
+RETURNS cstring
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE TYPE rank(
+    INPUT          = rank_in,
+    OUTPUT         = rank_out,
+
+    INTERNALLENGTH = 1,     -- use 4 bytes to store data
+    ALIGNMENT      = char,  -- align to 4 bytes
+    STORAGE        = PLAIN, -- always store data inline uncompressed (not toasted)
+    PASSEDBYVALUE           -- pass data by value rather than by reference
+);
+
+
+CREATE FUNCTION square_to_rank(square)
+RETURNS rank
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+CREATE CAST (square AS rank) WITH FUNCTION square_to_rank(square);
+
+CREATE FUNCTION char_to_int(rank)
+RETURNS int4
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+CREATE CAST (rank AS int4) WITH FUNCTION char_to_int(rank);
+
+/****************************************************************************
+-- diagonal
+ ****************************************************************************/
+
+CREATE FUNCTION diagonal_in(cstring)
+RETURNS diagonal
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION diagonal_out(diagonal)
+RETURNS cstring
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE TYPE diagonal(
+    INPUT          = diagonal_in,
+    OUTPUT         = diagonal_out,
+
+    INTERNALLENGTH = 1,     -- use 4 bytes to store data
+    ALIGNMENT      = char,  -- align to 4 bytes
+    STORAGE        = PLAIN, -- always store data inline uncompressed (not toasted)
+    PASSEDBYVALUE           -- pass data by value rather than by reference
+);
+
+
+CREATE FUNCTION square_to_diagonal(square)
+RETURNS diagonal
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+CREATE CAST (square AS diagonal) WITH FUNCTION square_to_diagonal(square);
+
+CREATE FUNCTION char_to_int(diagonal)
+RETURNS int4
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+CREATE CAST (diagonal AS int4) WITH FUNCTION char_to_int(diagonal);
+
+/****************************************************************************
+-- adiagonal
+ ****************************************************************************/
+
+CREATE FUNCTION adiagonal_in(cstring)
+RETURNS adiagonal
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION adiagonal_out(adiagonal)
+RETURNS cstring
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE TYPE adiagonal(
+    INPUT          = adiagonal_in,
+    OUTPUT         = adiagonal_out,
+
+    INTERNALLENGTH = 1,     -- use 4 bytes to store data
+    ALIGNMENT      = char,  -- align to 4 bytes
+    STORAGE        = PLAIN, -- always store data inline uncompressed (not toasted)
+    PASSEDBYVALUE           -- pass data by value rather than by reference
+);
+
+
+CREATE FUNCTION square_to_adiagonal(square)
+RETURNS adiagonal
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+CREATE CAST (square AS adiagonal) WITH FUNCTION square_to_adiagonal(square);
+
+CREATE FUNCTION char_to_int(adiagonal)
+RETURNS int4
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+CREATE CAST (adiagonal AS int4) WITH FUNCTION char_to_int(adiagonal);
+
+
+
+
 
 

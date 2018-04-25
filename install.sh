@@ -13,4 +13,4 @@ sudo make uninstall
 sudo make install
 psql -c"drop extension if exists chess_index"
 psql -c"create extension chess_index"
-make installcheck
+#make installcheck
