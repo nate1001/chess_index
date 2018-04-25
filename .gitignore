@@ -4,3 +4,4 @@ src/*.o
 data/*.pgn
 data/*.bz2
 *.swp
+*.log

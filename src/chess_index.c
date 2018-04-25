@@ -407,26 +407,25 @@ int_to_square(PG_FUNCTION_ARGS)
 static char	_piece_out(char piece)
 {
 
+    char        val;
 	switch (piece) {
-		case 'p':
-		case 'n':
-		case 'b':
-		case 'r':
-		case 'q':
-		case 'k':
-		case 'P':
-		case 'N':
-		case 'B':
-		case 'R':
-		case 'Q':
-		case 'K':
-			break;
-
+        case 1: val='P'; break;
+        case 2: val='p'; break;
+        case 3: val='N'; break;
+        case 4: val='n'; break;
+        case 5: val='B'; break;
+        case 6: val='b'; break;
+        case 7: val='R'; break;
+        case 8: val='r'; break;
+        case 9: val='Q'; break;
+        case 10: val='q'; break;
+        case 11: val='K'; break;
+        case 12: val='k'; break;
 		default:
 			BAD_TYPE_OUT("piece", piece);
 			break;
 	}
-	return piece;
+	return val;
 }
 
 
@@ -434,31 +433,29 @@ Datum
 piece_in(PG_FUNCTION_ARGS)
 {
 	char 			*str = PG_GETARG_CSTRING(0);
+    char            val;
 
 	if (strlen(str) != 1)
 		BAD_TYPE_IN("piece", str);
 
 	switch (str[0]) {
-		case 'p':
-		case 'n':
-		case 'b':
-		case 'r':
-		case 'q':
-		case 'k':
-		case 'P':
-		case 'N':
-		case 'B':
-		case 'R':
-		case 'Q':
-		case 'K':
-			break;
-
+        case 'P': val=1; break;
+        case 'p': val=2; break;
+        case 'N': val=3; break;
+        case 'n': val=4; break;
+        case 'B': val=5; break;
+        case 'b': val=6; break;
+        case 'R': val=7; break;
+        case 'r': val=8; break;
+        case 'Q': val=9; break;
+        case 'q': val=10; break;
+        case 'K': val=11; break;
+        case 'k': val=12; break;
 		default:
 			BAD_TYPE_IN("piece", str);
 			break;
 	}
-
-	PG_RETURN_CHAR(str[0]);
+	PG_RETURN_CHAR(val);
 }
 
 

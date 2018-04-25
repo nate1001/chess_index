@@ -147,19 +147,21 @@ AS '$libdir/chess_index'
 LANGUAGE C IMMUTABLE STRICT;
 
 CREATE TYPE piece(
-  INPUT          = piece_in,
-  OUTPUT         = piece_out,
-  LIKE           = char,
-	INTERNALLENGTH = 1,     -- use 4 bytes to store data
-	ALIGNMENT      = char,  -- align to 4 bytes
-	STORAGE        = PLAIN, -- always store data inline uncompressed (not toasted)
-	PASSEDBYVALUE           -- pass data by value rather than by reference
+    INPUT          = piece_in,
+    OUTPUT         = piece_out,
+    LIKE           = char,
+    INTERNALLENGTH = 1,    
+	ALIGNMENT      = char, 
+	STORAGE        = PLAIN,
+	PASSEDBYVALUE         
 );
 
 CREATE FUNCTION piece_eq(piece, piece)
 RETURNS boolean LANGUAGE internal IMMUTABLE as 'chareq';
 CREATE FUNCTION piece_ne(piece, piece)
 RETURNS boolean LANGUAGE internal IMMUTABLE as 'charne';
+CREATE FUNCTION hash_square(piece)
+RETURNS integer LANGUAGE internal IMMUTABLE AS 'hashchar';
 
 CREATE OPERATOR = (
     LEFTARG = piece,
@@ -181,6 +183,11 @@ CREATE OPERATOR <> (
     RESTRICT = neqsel,
     JOIN = neqjoinsel
 );
+
+CREATE OPERATOR CLASS hash_piece_ops
+DEFAULT FOR TYPE piece USING hash AS
+OPERATOR        1       = ,
+FUNCTION        1       hash_square(piece);
 
 
 /****************************************************************************
