@@ -14,17 +14,22 @@
 #include "catalog/namespace.h"
 #include "catalog/pg_type.h"
 
-//#define EXTRA_DEBUG 1
+#define EXTRA_DEBUG 1
 
 PG_FUNCTION_INFO_V1(char_to_int);
 
-PG_FUNCTION_INFO_V1(chess_cmp);
-PG_FUNCTION_INFO_V1(chess_cmp_eq);
-PG_FUNCTION_INFO_V1(chess_cmp_neq);
-PG_FUNCTION_INFO_V1(chess_cmp_gt);
-PG_FUNCTION_INFO_V1(chess_cmp_lt);
-PG_FUNCTION_INFO_V1(chess_cmp_lteq);
-PG_FUNCTION_INFO_V1(chess_cmp_gteq);
+PG_FUNCTION_INFO_V1(board_in);
+PG_FUNCTION_INFO_V1(board_out);
+PG_FUNCTION_INFO_V1(board_cmp);
+PG_FUNCTION_INFO_V1(board_eq);
+PG_FUNCTION_INFO_V1(board_ne);
+PG_FUNCTION_INFO_V1(board_lt);
+PG_FUNCTION_INFO_V1(board_gt);
+PG_FUNCTION_INFO_V1(board_le);
+PG_FUNCTION_INFO_V1(board_ge);
+PG_FUNCTION_INFO_V1(board_hash);
+PG_FUNCTION_INFO_V1(piece_count);
+PG_FUNCTION_INFO_V1(board_go);
 
 PG_FUNCTION_INFO_V1(square_in);
 PG_FUNCTION_INFO_V1(square_out);
@@ -32,9 +37,6 @@ PG_FUNCTION_INFO_V1(int_to_square);
 
 PG_FUNCTION_INFO_V1(piece_in);
 PG_FUNCTION_INFO_V1(piece_out);
-
-PG_FUNCTION_INFO_V1(fen_in);
-PG_FUNCTION_INFO_V1(fen_out);
 
 PG_FUNCTION_INFO_V1(cfile_in);
 PG_FUNCTION_INFO_V1(cfile_out);
@@ -52,16 +54,17 @@ PG_FUNCTION_INFO_V1(adiagonal_in);
 PG_FUNCTION_INFO_V1(adiagonal_out);
 PG_FUNCTION_INFO_V1(square_to_adiagonal);
 
-static char *_square_out(char c, char *str);
 
 #define CHECK_BIT(board, k) ((1ul << k) & board)
 #define GET_PIECE(pieces, k) k%2 ? pieces[k/2] & 0x0f : (pieces[k/2] & 0xf0) >> 4
 #define SET_PIECE(pieces, k, v) pieces[k/2] = k%2 ? ( (pieces[k/2] & 0xF0) | (v & 0xF)) : ((pieces[k/2] & 0x0F) | (v & 0xF) << 4)
+#define SET_BOARD(board, k) board |= (1Ul << (k--));
 #define TO_SQUARE_IDX(i)  (i/8)*8 + (8 - i%8) - 1;
-#define CHAR_CFILE(s) 'a' + _square_to_cfile(s)
-#define CHAR_RANK(s) '1' + _square_to_rank(s)
+#define CHAR_CFILE(s) 'a' + TO_FILE(s)
+#define CHAR_RANK(s) '1' + TO_RANK(s)
 #define MAKE_SQUARE(file, rank, str) {str[0]=file; str[1]=rank;}
-
+#define TO_RANK(s) s/8
+#define TO_FILE(s) s%8
 
 #define MAX_FEN 100
 #define MAX_PIECES 32
@@ -75,27 +78,45 @@ static char *_square_out(char c, char *str);
 #define WHITE_KNIGHT 0x02     // 2 | White Knight                                |
 #define WHITE_BISHOP 0x3      // 3 | White Bishop                                |
 #define WHITE_QUEEN 0x4       // 4 | White Queen                                 |
-#define WHITE_KING_MOVE 0x5   // 5 | White King; White to move next              |
+//#define WHITE_KING_MOVE 0x5   // 5 | White King; White to move next              |
 #define WHITE_KING 0x6        // 6 | White King                                  |
-#define WHITE_SPECIAL 0x7     // 7 | White Rook (pre castle) / Pawn (en Passant) |
+//#define WHITE_SPECIAL 0x7     // 7 | White Rook (pre castle) / Pawn (en Passant) |
 #define BLACK_PAWN 0x8        // 8 | Black Pawn (normal)                         |
 #define BLACK_ROOK 0x9        // 9 | Black Rook (has moved)                      |
 #define BLACK_KNIGHT 0xA      // A | Black Knight                                |
 #define BLACK_BISHOP 0xB      // B | Black Bishop                                |
 #define BLACK_QUEEN  0xC      // C | Black Queen                                 |
 #define BLACK_KING 0xD        // D | Black King; Black to move next              |
-#define BLACK_KING_MOVE 0xE   // E | Black King                                  |
-#define BLACK_SPECIAL 0xF     // F | Black Rook (pre castle) / Pawn (en Passant) |
+//#define BLACK_KING_MOVE 0xE   // E | Black King                                  |
+//#define BLACK_SPECIAL 0xF     // F | Black Rook (pre castle) / Pawn (en Passant) |
 
 /*
- * max size -> 28: 32 pieces of 4 bit nibbles = 16 bytes + 8 byte bitboard + 4 byte length (required by pg)
- * min size -> 13: 3 pieces of 4 bit nibbles = 1 byte + 8 byte bitboard + 4 byte length (required by pg)
+ * base-size -> 14: 8 byte bitboard + 4 byte struct length (required by pg) + 2 for state
+ * min size ->  16: 3 pieces of 4 bit nibbles = 2 bytes
+ * max size ->  30: 32 pieces of 4 bit nibbles = 16 bytes
+ *
+ * reality of alignment 16-32
  */
+
 typedef struct {
     int32           vl_len;
+    unsigned int    whitesgo : 1;
+    unsigned int    pcount : 6; //0-32
+    int             enpassant : 7; // this could be reduced to side and file - 4 bits
+    unsigned int    wk : 1;
+    unsigned int    wq : 1;
+    unsigned int    bk : 1;
+    unsigned int    bq : 1;
+    unsigned int    _unused: 14;
     int64           board;
+#ifdef EXTRA_DEBUG
+	char			orig_fen[MAX_FEN];
+#endif
     unsigned char   pieces[FLEXIBLE_ARRAY_MEMBER];
-} board;
+} Board;
+
+static char *_square_out(char c, char *str);
+static int _board_fen(const Board * b, char * str);
 
 #ifdef PG_MODULE_MAGIC
 PG_MODULE_MAGIC;
@@ -181,6 +202,18 @@ static ArrayType * make_array( char *typname, size_t size, Datum * data)
 
 */
 
+//http://www.cse.yorku.ca/~oz/hash.html
+static unsigned int _sdbm_hash(str)
+unsigned char *str;
+{
+	unsigned long hash = 0;
+	int c;
+
+	while ((c = *str++))
+		hash = c + (hash << 6) + (hash << 16) - hash;
+	return hash;
+}
+
 #ifdef EXTRA_DEBUG
 static void debug_bitboard(int64 a) {
 
@@ -210,11 +243,6 @@ char_to_int(PG_FUNCTION_ARGS)
  * 		files
  ********************************************************/
 
-static char _square_to_cfile(char s) 
-{
-    return s%8;
-}
-
 static char _cfile_in(char f) 
 {
     if (f < 'a' || f > 'h') 
@@ -226,7 +254,7 @@ static char _cfile_in(char f)
 square_to_cfile(PG_FUNCTION_ARGS)
 {
     char 			s = PG_GETARG_CHAR(0);
-    PG_RETURN_CHAR(_square_to_cfile(s));
+    PG_RETURN_CHAR(TO_FILE(s));
 }
 
     Datum
@@ -255,11 +283,6 @@ cfile_out(PG_FUNCTION_ARGS)
  * 		ranks
  ********************************************************/
 
-static char _square_to_rank(char s) 
-{
-    return s/8;
-}
-
 static char _rank_in(char r) 
 {
     if (r < '1' || r > '8') 
@@ -271,7 +294,7 @@ static char _rank_in(char r)
 square_to_rank(PG_FUNCTION_ARGS)
 {
     char 			s = PG_GETARG_CHAR(0);
-    PG_RETURN_CHAR(_square_to_rank(s));
+    PG_RETURN_CHAR(TO_RANK(s));
 }
 
     Datum
@@ -319,7 +342,7 @@ static char _square_in(char file, char rank)
     CH_DEBUG5("_square_in: file:%c rank:%c char:%i", file, rank, c);
 #ifdef EXTRA_DEBUG
     CH_DEBUG5("_square_in char of file rank: %c%c:", CHAR_CFILE(c), CHAR_RANK(c));
-    CH_DEBUG5("c file:%i c rank:%i", _square_to_cfile(c), _square_to_rank(c));
+    CH_DEBUG5("c file:%i c rank:%i", TO_FILE(c), TO_RANK(c));
     CH_DEBUG5("file - 'a':%i rank-'1':%i", file -'a', rank-'1');
 #endif
 
@@ -365,7 +388,7 @@ static char *_square_out(char c, char *str)
 }
 
 
-    Datum
+Datum
 square_in(PG_FUNCTION_ARGS)
 {
     char 			*str = PG_GETARG_CSTRING(0);
@@ -377,7 +400,7 @@ square_in(PG_FUNCTION_ARGS)
 }
 
 
-    Datum
+Datum
 square_out(PG_FUNCTION_ARGS)
 {
     char			square = PG_GETARG_CHAR(0);
@@ -389,7 +412,7 @@ square_out(PG_FUNCTION_ARGS)
     PG_RETURN_CSTRING(result);
 }
 
-    Datum
+Datum
 int_to_square(PG_FUNCTION_ARGS)
 {
     char            c = (char)PG_GETARG_INT32(0);
@@ -658,8 +681,6 @@ adiagonal_out(PG_FUNCTION_ARGS)
     PG_RETURN_CSTRING(result);
 }
 
-
-
 /********************************************************
  * 		fen
  ********************************************************/
@@ -669,19 +690,97 @@ adiagonal_out(PG_FUNCTION_ARGS)
  * https://codegolf.stackexchange.com/questions/19397/smallest-chess-board-compression
  * second answer : 192 bits
  */
+ 
+static int _board_compare(const Board *a, const Board *b) 
+{
+    if (a->pcount > b->pcount)
+        return 1;
+    else if (a->pcount < b->pcount)
+        return -1;
+    else
+        return (memcmp(a, b, sizeof(a) + a->pcount));
+}
 
-    Datum
-fen_in(PG_FUNCTION_ARGS)
+Datum
+board_cmp(PG_FUNCTION_ARGS)
+{
+    const Board     *a = (Board *) PG_GETARG_POINTER(0);
+    const Board     *b = (Board *) PG_GETARG_POINTER(1);
+    PG_RETURN_INT32(_board_compare(a, b));
+}
+
+Datum
+board_eq(PG_FUNCTION_ARGS)
+{
+    const Board     *a = (Board *) PG_GETARG_POINTER(0);
+    const Board     *b = (Board *) PG_GETARG_POINTER(1);
+    PG_RETURN_BOOL(_board_compare(a, b) == 0);
+}
+
+Datum
+board_ne(PG_FUNCTION_ARGS)
+{
+    const Board     *a = (Board *) PG_GETARG_POINTER(0);
+    const Board     *b = (Board *) PG_GETARG_POINTER(1);
+    PG_RETURN_BOOL(_board_compare(a, b) != 0);
+}
+
+Datum
+board_lt(PG_FUNCTION_ARGS)
+{
+    const Board     *a = (Board *) PG_GETARG_POINTER(0);
+    const Board     *b = (Board *) PG_GETARG_POINTER(1);
+    PG_RETURN_BOOL(_board_compare(a, b) < 0);
+}
+
+Datum
+board_gt(PG_FUNCTION_ARGS)
+{
+    const Board     *a = (Board *) PG_GETARG_POINTER(0);
+    const Board     *b = (Board *) PG_GETARG_POINTER(1);
+    PG_RETURN_BOOL(_board_compare(a, b) > 0);
+}
+
+Datum
+board_le(PG_FUNCTION_ARGS)
+{
+    const Board     *a = (Board *) PG_GETARG_POINTER(0);
+    const Board     *b = (Board *) PG_GETARG_POINTER(1);
+    PG_RETURN_BOOL(_board_compare(a, b) <= 0);
+}
+
+Datum
+board_ge(PG_FUNCTION_ARGS)
+{
+    const Board     *a = (Board *) PG_GETARG_POINTER(0);
+    const Board     *b = (Board *) PG_GETARG_POINTER(1);
+    PG_RETURN_BOOL(_board_compare(a, b) >= 0);
+}
+
+Datum
+board_hash(PG_FUNCTION_ARGS)
+{
+
+	const Board     *b = (Board *) PG_GETARG_POINTER(0);
+	char            str[MAX_FEN];
+
+	_board_fen(b, str);
+	PG_RETURN_INT64(_sdbm_hash(str));
+}
+
+
+
+Datum
+board_in(PG_FUNCTION_ARGS)
 {
     char 			*str = PG_GETARG_CSTRING(0);
-    board           *result;
+    Board           *result;
     unsigned char   c, p='\0', pieces[MAX_PIECES];
     int64           bitboard=0;
     int             i=0, j=BOARD_SIZE-1, k=0, s;
-    bool            done=false, whitesgo=false, wk=false, wq=false, bk=false, bq=false, epfound=false;
-    char            enpassant=-1;
+    bool            done=false, wk=false, wq=false, bk=false, bq=false;
+    char            enpassant=-1, whitesgo=-1;
     size_t          s1, s2;
-
 
     if (strlen(str) > MAX_FEN)
         CH_ERROR("fen string too long");
@@ -693,8 +792,8 @@ fen_in(PG_FUNCTION_ARGS)
         if (c == ' ') break;
     }
     switch (str[i++]) {
-        case 'w': whitesgo=true; break;
-        case 'b': whitesgo=false; break;
+        case 'w': whitesgo=1; break;
+        case 'b': whitesgo=0; break;
         default: CH_ERROR("bad move side in fen"); break;
     }
     i++;
@@ -709,7 +808,7 @@ fen_in(PG_FUNCTION_ARGS)
         }
     }
     c = str[++i];
-    if (c >= 'a' && c <= 'f') {
+    if (c >= 'a' && c <= 'h') {
         p = str[++i];
         if (p != '3' && p != '6')
             CH_ERROR("bad enpassant rank in fen '%c'", p);
@@ -723,79 +822,63 @@ fen_in(PG_FUNCTION_ARGS)
 
     } else if (c=='-') {
     } else {
-        CH_ERROR("bad enpassant in fen '%c'", enpassant);
+        CH_DEBUG5("fen:'%s':", str);
+        CH_ERROR("bad enpassant in fen: '%c%i':", c, p);
     }
 
     i = 0;
     while (str[i] != '\0') {
 
-        //first fallthrough switch for bitboard
+        // i indexes differently than square type (for enpassant)
+        s = TO_SQUARE_IDX(j);
+
         switch (c=str[i]) {
-            case 'p':
-            case 'n':
-            case 'b':
-            case 'r':
-            case 'q':
-            case 'k':
-            case 'P':
-            case 'N':
-            case 'B':
-            case 'R':
-            case 'Q':
-            case 'K':
-                // i indexes differently than square type (for enpassant)
-                s = TO_SQUARE_IDX(j);
-                CH_DEBUG5("_fen_in: :square: %c%c: str[i]:%c", CHAR_CFILE(s), CHAR_RANK(s), str[i]);
-                bitboard |= (1Ul << (j--));
-                if (s==enpassant) {
-                    epfound = true;
-                    if (str[i] == 'p')
-                        p = BLACK_SPECIAL;
-                    else if (str[i] == 'P')
-                        p = WHITE_SPECIAL;
-                    else
+                case 'p': case 'n': case 'b': case 'r': case 'q': case 'k':
+                case 'P': case 'N': case 'B': case 'R': case 'Q': case 'K':
+
+                    CH_DEBUG5("_fen_in: :square: %c%c: str[i]:%c", CHAR_CFILE(s), CHAR_RANK(s), str[i]);
+                    SET_BOARD(bitboard, j);
+                    if (s==enpassant && str[i] != 'p' && str[i] != 'P') {
                         CH_ERROR("no pawn found for enpassant at %c%c", CHAR_CFILE(s), CHAR_RANK(s));
-                } else {
-                // second switch for pieces
-                    switch (c=str[i]) {
+                    }
+                    switch(str[i]) {
                         case 'p': p = BLACK_PAWN; break;
                         case 'n': p = BLACK_KNIGHT; break;
                         case 'b': p = BLACK_BISHOP; break;
-                        case 'r': p = bk && s==63 ? BLACK_SPECIAL : bq && s==56 ? BLACK_SPECIAL : BLACK_ROOK; break;
+                        case 'r': p = BLACK_ROOK; break;
                         case 'q': p = BLACK_QUEEN; break;
-                        case 'K': p = whitesgo ? WHITE_KING_MOVE : WHITE_KING; break;
+                        case 'k': p = BLACK_KING; break;
 
                         case 'P': p = WHITE_PAWN; break;
                         case 'N': p = WHITE_KNIGHT; break;
                         case 'B': p = WHITE_BISHOP; break;
-                        case 'R': p = wk && s==7 ? WHITE_SPECIAL : wq && s==0 ? WHITE_SPECIAL : WHITE_ROOK; break;
+                        case 'R': p = WHITE_ROOK; break;
                         case 'Q': p = WHITE_QUEEN; break;
-                        case 'k': p = whitesgo ? BLACK_KING : BLACK_KING_MOVE; break;
+                        case 'K': p = WHITE_KING; break;
                     }
-                }
-                SET_PIECE(pieces, k, p);
-                k++;
-                if (k>MAX_PIECES)
-                    CH_ERROR("too many pieces in fen");
-                break;
-            case '1':
-            case '2':
-            case '3':
-            case '4':
-            case '5':
-            case '6':
-            case '7':
-            case '8':
-                j -= (c - '0');
-            case '/':
-                break;
-            case ' ':
-                done=true;
-                break;
-            default:
-                BAD_TYPE_IN("fen", str);
-                break;
+                    SET_PIECE(pieces, k, p);
+                    k++;
+                    break;
+                case '1':
+                case '2':
+                case '3':
+                case '4':
+                case '5':
+                case '6':
+                case '7':
+                case '8':
+                          j -= (c - '0');
+                case '/':
+                          break;
+                case ' ':
+                          done=true;
+                          break;
+                default:
+                          CH_ERROR("unkdown character in fen '%c'", c);
+                          break;
         }
+        if (k>MAX_PIECES)
+            CH_ERROR("too many pieces in fen");
         i++;
         if (done) 
             break;
@@ -806,59 +889,75 @@ fen_in(PG_FUNCTION_ARGS)
     if (j>-1)
         CH_ERROR("FEN board is too short");
 
-#ifdef EXTRA_DEBUG
-    debug_bitboard(bitboard);
-#endif
-
-    if (enpassant != -1 && !epfound)
-        CH_ERROR("en passant set for %c%c but no pawn was found", CHAR_CFILE(enpassant), CHAR_RANK(enpassant));
 
     s1 = k/2 + k%2 ; // pieces size
-    //  bitboard            length
-    s2 = sizeof(int64) +  sizeof(int32);
-    result = (board*)palloc(s1+s2);
+    s2 = sizeof(Board);
+    //CH_NOTICE("sizeof board %li sizeof pieces:%li", s2, s1);
+    result = (Board*)palloc(s2 + s1);
     memset(result, 0, s1+s2);
     SET_VARSIZE(result, s1+s2);
 
+#ifdef EXTRA_DEBUG
+	debug_bitboard(bitboard);
+	strcpy(result->orig_fen, str);
+#endif
+
     result->board = bitboard;
+    result->wk = wk;
+    result->wq = wq;
+    result->bk = bk;
+    result->bq = bq;
+    result->enpassant = enpassant;
+    result->whitesgo = whitesgo;
+    result->pcount = k;
     memcpy(result->pieces, pieces, s1);
+
+    /*
+    for (i=0; i<k; i++)
+        CH_DEBUG5("piece %i:0x%08X", i, pieces[i]);
+    */
 
     PG_RETURN_POINTER(result);
 }
 
-Datum
-fen_out(PG_FUNCTION_ARGS)
+
+static int _board_fen(const Board * b, char * str)
 {
-
-    //_int_gist.c:    GISTENTRY  *entry = (GISTENTRY *) PG_GETARG_POINTER(0);
-
-    const board     *b = (board *) PG_GETARG_POINTER(0);
-    char            *str = palloc(MAX_FEN);
-    char            *result;
-    unsigned char   piece;
-    int             i, j=0, k=0,empties=0, s;
-    bool            wk=false, wq=false, bk=false, bq=false;
-    char            enpassant=-1, whitesgo=-1;
-
+    int             i;
+    unsigned char   j=0, k=0, empties=0, s, piece;
 
 #ifdef EXTRA_DEBUG
     debug_bitboard(b->board);
+    CH_DEBUG5("orig fen: %s", b->orig_fen);
+	CH_DEBUG5("piece count: %i", b->pcount);
 #endif
-
     for (i=BOARD_SIZE-1; i>=0; i--) {
-
+        if (j >= MAX_FEN) {
+#ifdef EXTRA_DEBUG
+            CH_ERROR("internal error: fen is too long; original fen:'%s'", b->orig_fen);
+#else 
+            CH_ERROR("internal error: fen is too long");
+#endif
+}
+        if (k > b->pcount) {
+#ifdef EXTRA_DEBUG
+    CH_ERROR("internal error: too many pieces; original fen:'%s'", b->orig_fen);
+#else 
+    CH_ERROR("internal error: too many pieces");
+#endif
+        }
         // need for square type
         s = TO_SQUARE_IDX(i);
-
-        CH_DEBUG5("_fen_out: :square: %c%c", CHAR_CFILE(s), CHAR_RANK(s));
 
         // if its an empty square
         if (!CHECK_BIT(b->board, i)) {
             empties += 1;
-            // else there is apiece
+		// else there is apiece
         } else {
-            // if we have some empties empty them
-            if (empties) str[j++] = empties + '0';
+            // if we have some empties then empty them
+            if (empties) 
+                str[j++] = empties + '0';
+
             empties = 0;
             piece = GET_PIECE(b->pieces, k);
             k++;
@@ -870,95 +969,80 @@ fen_out(PG_FUNCTION_ARGS)
                 case BLACK_ROOK:    str[j++] = 'r'; break;
                 case BLACK_QUEEN:   str[j++] = 'q'; break;
                 case BLACK_KING:    str[j++] = 'k'; break;
-                case BLACK_KING_MOVE: str[j++] = 'k'; whitesgo=0; break;
                 case WHITE_PAWN:    str[j++] = 'P'; break;
                 case WHITE_KNIGHT:  str[j++] = 'N'; break;
                 case WHITE_BISHOP:  str[j++] = 'B'; break;
                 case WHITE_ROOK:    str[j++] = 'R'; break;
                 case WHITE_QUEEN:   str[j++] = 'Q'; break;
                 case WHITE_KING:    str[j++] = 'K'; break;
-                case WHITE_KING_MOVE: str[j++] = 'K'; whitesgo=1; break;
-
-                case WHITE_SPECIAL:
-                          // if its a castle special
-                          if (_square_to_rank(s)==0) {
-                                str[j++] = 'R';
-                                switch (_square_to_cfile(s)) {
-                                    case 0: wq=true; break;
-                                    case 7: wk=true; break;
-                                    default: 
-                                        CH_ERROR("bad file for white castle: %c", _square_to_cfile(s));
-                                        break;
-                                }
-                          // if its a en passant special
-                          } else if (_square_to_rank(s)==3) {
-                              enpassant = s;
-                              str[j++] = 'P';
-                          } else {
-                              CH_ERROR("bad internal 'white special' at %c%c", CHAR_CFILE(s), CHAR_RANK(s));
-                          }
-                          break;
-                case BLACK_SPECIAL:
-                          // if its a castle special
-                          if (_square_to_rank(s)==7) {
-                              str[j++] = 'r';
-                              switch (_square_to_cfile(s)) {
-                                  case 0: bq=true; break;
-                                  case 7: bk=true; break;
-                                  default: 
-                                          CH_ERROR("bad file for black castle: %c", _square_to_cfile(s));
-                                          break;
-                              }
-                              // if its a en passant special
-                          } else if (_square_to_rank(s)==4) {
-                              enpassant = s;
-                              str[j++] = 'p';
-                          } else {
-                              CH_ERROR("bad internal 'black special' at %c%c", CHAR_CFILE(s), CHAR_RANK(s));
-                          }
-                          break;
-
                 default:
-                          // should not get here :)
-                          BAD_TYPE_OUT("fen", piece);
-                          break;
+                    // should not get here :)
+                    CH_ERROR("internal error: unknown piece type at piece %i in board: %i", k, piece);
+                    break;
             }
+			CH_DEBUG5("_fen_out: i:%i :square: %c%c piece:%c",i, CHAR_CFILE(s), CHAR_RANK(s), str[j-1]);
         }
         // if were at the end or a row add '/' and perhaps and empty number
         if (i%8==0) { 
-            if (empties) str[j++] = empties + '0';
-            if (i) str[j++] = '/';
+            if (empties) 
+                str[j++] = empties + '0';
+            if (i) 
+                str[j++] = '/';
             empties = 0;
         }
     }
     str[j++] = ' ';
-    if (whitesgo==0)
-        str[j++] = 'b';
-    else if (whitesgo==1)
-        str[j++] = 'w';
-    else
-        CH_ERROR("side to move not found");
+    str[j++] = b->whitesgo ? 'w' : 'b';
 
     str[j++] = ' ';
-    if (wk + wq + bk + bq > 0) {
-        if (wk) str[j++] = 'K';
-        if (wq) str[j++] = 'Q';
-        if (bk) str[j++] = 'k';
-        if (bq) str[j++] = 'q';
+    if (b->wk + b->wq + b->bk + b->bq > 0) {
+        if (b->wk) str[j++] = 'K';
+        if (b->wq) str[j++] = 'Q';
+        if (b->bk) str[j++] = 'k';
+        if (b->bq) str[j++] = 'q';
     } else
         str[j++] = '-';
 
     str[j++] = ' ';
-    if (enpassant > -1) {
-        str[j++] = CHAR_CFILE(enpassant);
-        str[j++] = CHAR_RANK(enpassant);
+    CH_DEBUG5("enp: %i", b->enpassant);
+    if (b->enpassant > -1) {
+        str[j++] = CHAR_CFILE(b->enpassant);
+        str[j++] = CHAR_RANK(b->enpassant);
     } else
         str[j++] = '-';
 
     str[j++] = '\0';
-    result = (char *)palloc(j);
-    memcpy(result, str, j);
+    return j;
+}
 
+Datum
+board_out(PG_FUNCTION_ARGS)
+{
+
+    const Board     *b = (Board *) PG_GETARG_POINTER(0);
+    char            str[MAX_FEN], n;
+    char            *result;
+
+    n = _board_fen(b, str);
+    result = (char *)palloc(n);
+    memcpy(result, str, n);
     PG_RETURN_CSTRING(result);
 }
 
+Datum
+piece_count(PG_FUNCTION_ARGS)
+{
+    const Board     *b = (Board *) PG_GETARG_POINTER(0);
+    PG_RETURN_CSTRING(b->pcount);
+}
+
+Datum
+board_go(PG_FUNCTION_ARGS)
+{
+    const Board     *b = (Board *) PG_GETARG_POINTER(0);
+    char            *str = palloc(2);
+
+    str[0] = b->whitesgo ? 'w' : 'b';
+    str[1] = '\0';
+    PG_RETURN_CSTRING(str);
+}

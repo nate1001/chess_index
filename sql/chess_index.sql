@@ -5,6 +5,8 @@
 
 -- set client_min_messages=DEBUG5;
 
+DROP TYPE IF EXISTS tomove CASCADE;
+CREATE TYPE tomove AS ENUM ('w', 'b');
 
 CREATE FUNCTION square_in(cstring)
 RETURNS square
@@ -24,7 +26,6 @@ CREATE TYPE square(
 	ALIGNMENT      = char,
 	STORAGE        = PLAIN,
 	PASSEDBYVALUE         
-
 );
 
 CREATE FUNCTION char_to_int(square)
@@ -193,25 +194,119 @@ FUNCTION        1       hash_square(piece);
 
 
 /****************************************************************************
--- fen
+-- fen/board
  ****************************************************************************/
 
-CREATE FUNCTION fen_in(cstring)
-RETURNS fen
-AS '$libdir/chess_index'
-LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION board_in(cstring)
+RETURNS board AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION fen_out(fen)
-RETURNS cstring
-AS '$libdir/chess_index'
-LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION board_out(board)
+RETURNS cstring AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
 
-CREATE TYPE fen(
-    INPUT          = fen_in,
-    OUTPUT         = fen_out,
-    ALIGNMENT      = int4,
+CREATE TYPE board(
+    INPUT          = board_in,
+    OUTPUT         = board_out,
     STORAGE        = PLAIN
 );
+
+CREATE FUNCTION piece_count(board)
+RETURNS int AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION board_go(board)
+RETURNS tomove AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION board_eq(board, board)
+RETURNS boolean AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION board_ne(board, board)
+RETURNS boolean AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION board_lt(board, board)
+RETURNS boolean AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION board_le(board, board)
+RETURNS boolean AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION board_gt(board, board)
+RETURNS boolean AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION board_ge(board, board)
+RETURNS boolean AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION board_cmp(board, board)
+RETURNS int AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION board_hash(board)
+RETURNS int AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OPERATOR = (
+    LEFTARG = board,
+    RIGHTARG = board,
+    PROCEDURE = board_eq,
+    COMMUTATOR = '=',
+    NEGATOR = '<>',
+    RESTRICT = eqsel,
+    JOIN = eqjoinsel,
+    HASHES, MERGES
+);
+
+CREATE OPERATOR <> (
+    LEFTARG = board,
+    RIGHTARG = board,
+    PROCEDURE = board_ne,
+    COMMUTATOR = '<>',
+    NEGATOR = '=',
+    RESTRICT = neqsel,
+    JOIN = neqjoinsel
+);
+
+CREATE OPERATOR < (
+    LEFTARG = board,
+    RIGHTARG = board,
+    PROCEDURE = board_lt,
+    COMMUTATOR = > ,
+    NEGATOR = >= ,
+    RESTRICT = scalarltsel,
+    JOIN = scalarltjoinsel
+);
+
+CREATE OPERATOR <= (
+    LEFTARG = board,
+    RIGHTARG = board,
+    PROCEDURE = board_le,
+    COMMUTATOR = >= ,
+    NEGATOR = > ,
+    RESTRICT = scalarltsel,
+    JOIN = scalarltjoinsel
+);
+
+CREATE OPERATOR > (
+    LEFTARG = board,
+    RIGHTARG = board,
+    PROCEDURE = board_gt,
+    COMMUTATOR = < ,
+    NEGATOR = <= ,
+    RESTRICT = scalargtsel,
+    JOIN = scalargtjoinsel
+);
+
+CREATE OPERATOR >= (
+    LEFTARG = board,
+    RIGHTARG = board,
+    PROCEDURE = board_ge,
+    COMMUTATOR = <= ,
+    NEGATOR = < ,
+    RESTRICT = scalargtsel,
+    JOIN = scalargtjoinsel
+);
+
+CREATE OPERATOR CLASS btree_board_ops
+DEFAULT FOR TYPE board USING btree
+AS
+OPERATOR        1       <  ,
+OPERATOR        2       <= ,
+OPERATOR        3       =  ,
+OPERATOR        4       >= ,
+OPERATOR        5       >  ,
+FUNCTION        1       board_cmp(board, board);
+
+CREATE OPERATOR CLASS hash_board_ops
+DEFAULT FOR TYPE board USING hash AS
+OPERATOR        1       = ,
+FUNCTION        1       board_hash(board);
+
 
 /****************************************************************************
 -- file
@@ -363,7 +458,47 @@ LANGUAGE C IMMUTABLE STRICT;
 CREATE CAST (adiagonal AS int4) WITH FUNCTION char_to_int(adiagonal);
 
 
+/****************************************************************************
+-- sql functions
+ ****************************************************************************/
 
+CREATE OR REPLACE FUNCTION pretty(text, uni bool default false, fen bool default true)
+RETURNS text AS $$
+    select replace(replace(replace(replace(replace(replace(replace(replace(
+            translate
+            (
+                 split_part($1, ' ', 1)
+                , case when $2 then '/prnbqkPRNBQK' else '/' end
+                , case when $2
+                    then E'\n�~Y~_�~Y~\�~Y~^�~Y~]�~Y~[�~Y~Z�~Y~Y�~Y~V�~Y~X�~Y~W�~Y~U�~Y~T'
+                    else E'\n'  
+                  end
+            )
+            , '8', '        ') 
+            , '7', '       ')
+            , '6', '      ') 
+            , '5', '     ')
+            , '4', '    ') 
+            , '3', '   ') 
+            , '2', '  ') 
+            , '1', ' ')
+        || E'\n' || split_part($1, ' ', 2)
+        || '  '  || split_part($1, ' ', 3)
+        || '  '  || split_part($1, ' ', 4)
+        || '  '  || split_part($1, ' ', 5)
+        || case when $3 then E'\n' || split_part($1::text, ' ', 1) else '' end
+        || e'\n'
+        
+    ;
+$$ LANGUAGE SQL IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION pretty(board, uni bool default false, fen bool default true)
+RETURNS text AS $$
+select pretty($1::text, $2, $3)
+$$ LANGUAGE SQL IMMUTABLE STRICT;
 
+CREATE OR REPLACE FUNCTION invert(board)
+RETURNS text AS $$
+    select translate($1::text, 'KQRBNPkqrbnpwb', 'kqrbnpKQRBNPbw')
+$$ LANGUAGE SQL IMMUTABLE STRICT;
 
