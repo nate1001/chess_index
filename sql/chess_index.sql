@@ -8,6 +8,31 @@
 DROP TYPE IF EXISTS tomove CASCADE;
 CREATE TYPE tomove AS ENUM ('w', 'b');
 
+/****************************************************************************
+-- side : white or black
+ ****************************************************************************/
+
+CREATE FUNCTION side_in(cstring)
+RETURNS side AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION side_out(side)
+RETURNS cstring AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+
+CREATE TYPE side(
+    INPUT          = side_in,
+    OUTPUT         = side_out,
+
+    LIKE           = char,
+    INTERNALLENGTH = 1,     
+    ALIGNMENT      = char,
+    STORAGE        = PLAIN,
+    PASSEDBYVALUE         
+);
+
+/****************************************************************************
+-- square:
+ ****************************************************************************/
+
 CREATE FUNCTION square_in(cstring)
 RETURNS square
 AS '$libdir/chess_index'
@@ -213,6 +238,8 @@ CREATE FUNCTION piece_count(board)
 RETURNS int AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
 CREATE FUNCTION board_go(board)
 RETURNS tomove AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION board_pieces(board, side)
+RETURNS pindex AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
 
 CREATE FUNCTION board_eq(board, board)
 RETURNS boolean AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
@@ -456,6 +483,31 @@ RETURNS int4
 AS '$libdir/chess_index'
 LANGUAGE C IMMUTABLE STRICT;
 CREATE CAST (adiagonal AS int4) WITH FUNCTION char_to_int(adiagonal);
+
+
+/****************************************************************************
+-- pindex : piece index
+ ****************************************************************************/
+
+CREATE FUNCTION pindex_in(cstring)
+RETURNS pindex
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION pindex_out(pindex)
+RETURNS cstring
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE TYPE pindex(
+    INPUT          = pindex_in,
+    OUTPUT         = pindex_out,
+
+    INTERNALLENGTH = 2,     
+    ALIGNMENT      = int2,
+    STORAGE        = PLAIN,
+    PASSEDBYVALUE         
+);
 
 
 /****************************************************************************
