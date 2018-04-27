@@ -95,7 +95,6 @@ PG_FUNCTION_INFO_V1(square_to_adiagonal);
 #define TO_RANK(s) s/8
 #define TO_FILE(s) s%8
 
-#define PIECE_INDEX_MAX 15
 #define MAX_FEN 100
 #define MAX_PIECES 32
 #define MAX_MOVES 192
@@ -103,31 +102,6 @@ PG_FUNCTION_INFO_V1(square_to_adiagonal);
 #define BOARD_SIZE 64
 #define RANK_SIZE 8
 
-#define WHITE_PAWN      0x0         // 0 | White Pawn (normal)                         |
-#define WHITE_ROOK      0x1         // 1 | White Rook (has moved)                      |
-#define WHITE_KNIGHT    0x2         // 2 | White Knight                                |
-#define WHITE_BISHOP    0x3         // 3 | White Bishop                                |
-#define WHITE_QUEEN     0x4         // 4 | White Queen                                 |
-//#define WHITE_KING_MOVE 0x5       // 5 | White King; White to move next              |
-#define WHITE_KING      0x6         // 6 | White King                                  |
-//#define WHITE_SPECIAL 0x7         // 7 | White Rook (pre castle) / Pawn (en Passant) |
-#define BLACK_PAWN      0x8         // 8 | Black Pawn (normal)                         |
-#define BLACK_ROOK      0x9         // 9 | Black Rook (has moved)                      |
-#define BLACK_KNIGHT    0xA         // A | Black Knight                                |
-#define BLACK_BISHOP    0xB         // B | Black Bishop                                |
-#define BLACK_QUEEN     0xC         // C | Black Queen                                 |
-#define BLACK_KING      0xD         // D | Black King; Black to move next              |
-//#define BLACK_KING_MOVE 0xE       // E | Black King                                  |
-//#define BLACK_SPECIAL 0xF         // F | Black Rook (pre castle) / Pawn (en Passant) |
-
-#define NOPIECE     0x0
-#define PAWN        0x1
-#define KNIGHT      0x2
-#define BISHOP      0x3
-#define ROOK        0x4
-#define QUEEN       0x5
-#define KING        0x6
-#define MAX_PIECE   KING
 
 #define CH_NOTICE(...) ereport(NOTICE, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
 #define CH_ERROR(...) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
@@ -146,12 +120,21 @@ PG_FUNCTION_INFO_V1(square_to_adiagonal);
             errmsg("corrupt internal data for %s: \"%d\"", type, input)))/*}}}*/
 // types
 /*{{{*/
-typedef enum {BLACK, WHITE} side_type;
+typedef enum            {BLACK, WHITE} side_type;
 
-const int             PIECES[] = {QUEEN, ROOK, BISHOP, KNIGHT, PAWN};
-const int             PIECE_COUNTS[] = {1, 2, 2, 2, 8};
-const int             WHITE_PIECES[] = {WHITE_QUEEN, WHITE_ROOK, WHITE_BISHOP, WHITE_KNIGHT, WHITE_PAWN};
-const int             BLACK_PIECES[] = {BLACK_QUEEN, BLACK_ROOK, BLACK_BISHOP, BLACK_KNIGHT, BLACK_PAWN};
+typedef enum            {WHITE_PAWN, WHITE_KNIGHT, WHITE_BISHOP, WHITE_ROOK, WHITE_QUEEN, WHITE_KING,
+                         BLACK_PAWN, BLACK_KNIGHT, BLACK_BISHOP, BLACK_ROOK, BLACK_QUEEN, BLACK_KING, CPIECE_MAX} cpiece_type;
+
+const cpiece_type       WHITE_PIECES[] = {WHITE_QUEEN, WHITE_ROOK, WHITE_BISHOP, WHITE_KNIGHT, WHITE_PAWN};
+const cpiece_type       BLACK_PIECES[] = {BLACK_QUEEN, BLACK_ROOK, BLACK_BISHOP, BLACK_KNIGHT, BLACK_PAWN};
+
+typedef enum            {NO_PIECE, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, PIECE_MAX} piece_type;
+
+const piece_type        PIECE_INDEX_PIECES[] = {QUEEN, ROOK, BISHOP, KNIGHT, PAWN};
+const int               PIECE_INDEX_COUNTS[] = {1, 2, 2, 2, 8};
+#define PIECE_INDEX_SUM 15
+#define PIECE_INDEX_MAX 5
+
 
 /*
  * base-size -> 14: 8 byte bitboard + 4 byte struct length (required by pg) + 2 for state
@@ -160,18 +143,17 @@ const int             BLACK_PIECES[] = {BLACK_QUEEN, BLACK_ROOK, BLACK_BISHOP, B
  *
  * reality of alignment 16-32
  */
-
 typedef struct {
-    int32           vl_len;
-    unsigned int    whitesgo : 1;
-    unsigned int    pcount : 6; //0-32
-    int             enpassant : 7; // this could be reduced to side and file - 4 bits
-    unsigned int    wk : 1;
-    unsigned int    wq : 1;
-    unsigned int    bk : 1;
-    unsigned int    bq : 1;
-    unsigned int    _unused: 14;
-    int64           board;
+    int32                 vl_len;
+    unsigned int          whitesgo : 1;
+    unsigned int          pcount : 6; //0-32
+    int                   enpassant : 7; // this could be reduced to side and file - 4 bits
+    unsigned int          wk : 1;
+    unsigned int          wq : 1;
+    unsigned int          bk : 1;
+    unsigned int          bq : 1;
+    unsigned int          _unused: 14;
+    int64                 board;
 #ifdef EXTRA_DEBUG
 	char			orig_fen[MAX_FEN];
 #endif
@@ -184,7 +166,6 @@ static int _board_fen(const Board * b, char * str);
 #ifdef PG_MODULE_MAGIC
 PG_MODULE_MAGIC;
 #endif
-
 
 /*
    chess=# select to_hex(idx), idx::bit(4)  from generate_series(0, 15) as idx;
@@ -227,6 +208,159 @@ square numbers
 * 		util
 ********************************************************/
 /*{{{*/
+
+Datum
+char_to_int(PG_FUNCTION_ARGS)
+{
+    char			c = PG_GETARG_CHAR(0);
+    PG_RETURN_INT32((int32)c);
+}
+
+static piece_type _piece_type(const cpiece_type p) 
+{
+    piece_type          result;
+
+    switch (p) {
+        case WHITE_PAWN:    result=PAWN; break;
+        case WHITE_KNIGHT:  result=KNIGHT; break;
+        case WHITE_BISHOP:  result=BISHOP; break;
+        case WHITE_ROOK:    result=ROOK; break;
+        case WHITE_QUEEN:   result=QUEEN; break;
+        case WHITE_KING:    result=KING; break;
+        case BLACK_PAWN:    result=PAWN; break;
+        case BLACK_KNIGHT:  result=KNIGHT; break;
+        case BLACK_BISHOP:  result=BISHOP; break;
+        case BLACK_ROOK:    result=ROOK; break;
+        case BLACK_QUEEN:   result=QUEEN; break;
+        case BLACK_KING:    result=KING; break;
+        default:
+            CH_ERROR("bad cpiece_type: %i", p); break;
+    }
+    return result;
+}
+
+static char _cpiece_type_char(const cpiece_type p) 
+{
+    char                result;
+    switch (p) {
+        case WHITE_PAWN:    result='P'; break;
+        case WHITE_KNIGHT:  result='N'; break;
+        case WHITE_BISHOP:  result='B'; break;
+        case WHITE_ROOK:    result='R'; break;
+        case WHITE_QUEEN:   result='Q'; break;
+        case WHITE_KING:    result='K'; break;
+        case BLACK_PAWN:    result='p'; break;
+        case BLACK_KNIGHT:  result='n'; break;
+        case BLACK_BISHOP:  result='b'; break;
+        case BLACK_ROOK:    result='r'; break;
+        case BLACK_QUEEN:   result='q'; break;
+        case BLACK_KING:    result='q'; break;
+        default:
+            CH_ERROR("bad cpiece_type: %i", p); break;
+    }
+    return result;
+}
+
+static cpiece_type _cpiece_type_in(char c)
+{
+    cpiece_type         result;
+    char                piece[] = ".";
+
+    switch(c) {
+        case 'P': result=WHITE_PAWN; break;
+        case 'R': result=WHITE_ROOK; break;
+        case 'N': result=WHITE_KNIGHT; break;
+        case 'B': result=WHITE_BISHOP; break;
+        case 'Q': result=WHITE_QUEEN; break;
+        case 'K': result=WHITE_KING; break;
+        case 'p': result=BLACK_PAWN; break;
+        case 'r': result=BLACK_ROOK; break;
+        case 'n': result=BLACK_KNIGHT; break;
+        case 'b': result=BLACK_BISHOP; break;
+        case 'q': result=BLACK_QUEEN; break;
+        case 'k': result=BLACK_KING; break;
+		default:
+            piece[0] = c;
+			BAD_TYPE_IN("cpiece", piece);
+			break;
+    }
+    return result;
+}
+
+static piece_type _piece_type_in(char c)
+{
+    piece_type          result;
+    char                piece[] = ".";
+
+    switch(c) {
+        case 'P': result=PAWN; break;
+        case 'R': result=ROOK; break;
+        case 'N': result=KNIGHT; break;
+        case 'B': result=BISHOP; break;
+        case 'Q': result=QUEEN; break;
+        case 'K': result=KING; break;
+        case 'p': result=PAWN; break;
+        case 'r': result=ROOK; break;
+        case 'n': result=KNIGHT; break;
+        case 'b': result=BISHOP; break;
+        case 'q': result=QUEEN; break;
+        case 'k': result=KING; break;
+		default:
+            piece[0] = c;
+			BAD_TYPE_IN("cpiece", piece);
+			break;
+    }
+    return result;
+}
+
+static char _piece_type_char(const piece_type p) 
+{
+    char        result;
+    switch (p) {
+        case NO_PIECE:  result='.'; break;
+        case PAWN:      result='P'; break;
+        case KNIGHT:    result='N'; break;
+        case BISHOP:    result='B'; break;
+        case ROOK:      result='R'; break;
+        case QUEEN:     result='Q'; break;
+        case KING:      result='K'; break;
+        default:
+            CH_ERROR("bad piece_type: %i", p); break;
+    }
+    return result;
+}
+
+//http://www.cse.yorku.ca/~oz/hash.html
+static unsigned int _sdbm_hash(str)
+unsigned char *str;
+{
+	unsigned long long hash = 0;
+	int c;
+
+	while ((c = *str++))
+		hash = c + (hash << 6) + (hash << 16) - hash;
+	return hash;
+}
+
+#ifdef EXTRA_DEBUG
+static void debug_bitboard(int64 a) {
+
+    char            *str = (char *) palloc(BOARD_SIZE+1);
+    int             cnt=BOARD_SIZE-1;
+    int64           b = a;
+
+    str += (BOARD_SIZE - 1);
+	while (cnt >=0) {
+          str[cnt] = (b & 1) + '0';
+          b >>= 1;
+	     cnt--;
+	}
+	str[BOARD_SIZE] = '\0';
+	CH_DEBUG5("bitboard: %ld: |%s|", a, str);
+}
+#endif
+ 
+
 /*
 static ArrayType * make_array( char *typname, size_t size, Datum * data)
 {
@@ -273,44 +407,7 @@ return ret;
 }
 */
 
-
-
-//http://www.cse.yorku.ca/~oz/hash.html
-static unsigned int _sdbm_hash(str)
-unsigned char *str;
-{
-	unsigned long long hash = 0;
-	int c;
-
-	while ((c = *str++))
-		hash = c + (hash << 6) + (hash << 16) - hash;
-	return hash;
-}
-
-#ifdef EXTRA_DEBUG
-static void debug_bitboard(int64 a) {
-
-    char            *str = (char *) palloc(BOARD_SIZE+1);
-    int             cnt=BOARD_SIZE-1;
-    int64           b = a;
-
-    str += (BOARD_SIZE - 1);
-	while (cnt >=0) {
-          str[cnt] = (b & 1) + '0';
-          b >>= 1;
-	     cnt--;
-	}
-	str[BOARD_SIZE] = '\0';
-	CH_DEBUG5("bitboard: %ld: |%s|", a, str);
-}
-#endif
- 
-Datum
-char_to_int(PG_FUNCTION_ARGS)
-{
-    char			c = PG_GETARG_CHAR(0);
-    PG_RETURN_INT32((int32)c);
-}/*}}}*//*}}}*/
+/*}}}*//*}}}*/
 /********************************************************
  * 		file
  ********************************************************/
@@ -503,57 +600,15 @@ int_to_square(PG_FUNCTION_ARGS)
 ********************************************************/
 /*{{{*/
 
-static char	_piece_out(char piece)
-{
-
-    char        val;
-	switch (piece) {
-        case WHITE_PAWN:    val='P'; break;
-        case WHITE_ROOK:    val='R'; break;
-        case WHITE_KNIGHT:  val='N'; break;
-        case WHITE_BISHOP:  val='B'; break;
-        case WHITE_QUEEN:   val='Q'; break;
-        case WHITE_KING:    val='K'; break;
-        case BLACK_PAWN:    val='p'; break;
-        case BLACK_ROOK:    val='r'; break;
-        case BLACK_KNIGHT:  val='n'; break;
-        case BLACK_BISHOP:  val='b'; break;
-        case BLACK_QUEEN:   val='q'; break;
-        case BLACK_KING:    val='k'; break;
-		default:
-			BAD_TYPE_OUT("piece", piece);
-			break;
-	}
-	return val;
-}
-
 Datum
 piece_in(PG_FUNCTION_ARGS)
 {
 	char 			*str = PG_GETARG_CSTRING(0);
-    char            val;
 
 	if (strlen(str) != 1)
 		BAD_TYPE_IN("piece", str);
 
-	switch (str[0]) {
-        case 'P': val=WHITE_PAWN; break;
-        case 'R': val=WHITE_ROOK; break;
-        case 'N': val=WHITE_KNIGHT; break;
-        case 'B': val=WHITE_BISHOP; break;
-        case 'Q': val=WHITE_QUEEN; break;
-        case 'K': val=WHITE_KING; break;
-        case 'p': val=BLACK_PAWN; break;
-        case 'r': val=BLACK_ROOK; break;
-        case 'n': val=BLACK_KNIGHT; break;
-        case 'b': val=BLACK_BISHOP; break;
-        case 'q': val=BLACK_QUEEN; break;
-        case 'k': val=BLACK_KING; break;
-		default:
-			BAD_TYPE_IN("piece", str);
-			break;
-	}
-	PG_RETURN_CHAR(val);
+	PG_RETURN_CHAR(_cpiece_type_in(str[0]));
 }
 
 
@@ -563,7 +618,7 @@ piece_out(PG_FUNCTION_ARGS)
 	char			piece = PG_GETARG_CHAR(0);
 	char			*result = (char *) palloc(2);
 
-	result[0] = _piece_out(piece);
+	result[0] = _cpiece_type_char(piece);
 	result[1] = '\0';
 
 	PG_RETURN_CSTRING(result);
@@ -753,31 +808,39 @@ adiagonal_out(PG_FUNCTION_ARGS)
 }
 /*}}}*/
 /********************************************************
- * 	    piece index	
+ * 	    pindex: piece index	
  ********************************************************/
 /*{{{*/
-Datum
-pindex_in(PG_FUNCTION_ARGS)
+
+unsigned short _pindex_in(char * str)
 {
-    char 			*str = PG_GETARG_CSTRING(0);
     char            check[] = "QRRBBNNPPPPPPPP";
     unsigned short  result=0;
     unsigned char   i;
 
+    //CH_NOTICE("_pindex_in: %s, %i", str, strlen(str));
 
-    if (strlen(str) != PIECE_INDEX_MAX)
+    if (strlen(str) != PIECE_INDEX_SUM)
         BAD_TYPE_IN("pindex", str);
 
-    for (i=0; i<=PIECE_INDEX_MAX; i++)
+    for (i=0; i<=PIECE_INDEX_SUM; i++)
         if (!(str[i] == check[i] || str[i] == '.'))
             BAD_TYPE_IN("pindex", str);
 
-    for (i=0; i<=PIECE_INDEX_MAX; i++)
+    for (i=0; i<=PIECE_INDEX_SUM; i++)
         if (str[i] != '.')
-            SET_BIT16(result, PIECE_INDEX_MAX - i);
-    //CH_NOTICE("val out: %i, size:%ui", result, sizeof(result));
+            SET_BIT16(result, PIECE_INDEX_SUM -1 - i);
 
-    PG_RETURN_INT16(result);
+    //CH_NOTICE("val out: %i, size:%ui", result, sizeof(result));
+    //
+    return result;
+}
+
+Datum
+pindex_in(PG_FUNCTION_ARGS)
+{
+    char 			*str = PG_GETARG_CSTRING(0);
+    PG_RETURN_INT16(_pindex_in(str));
 }
 
 Datum
@@ -789,21 +852,21 @@ pindex_out(PG_FUNCTION_ARGS)
     //CH_NOTICE("val in: %i", pindex);
 
     memset(result, 0, PIECE_INDEX_MAX+1);
-    result[0] = GET_BIT16(pindex, 15)  ? 'Q' : '.';
-    result[1] = GET_BIT16(pindex, 14)  ? 'R' : '.';
-    result[2] = GET_BIT16(pindex, 13)  ? 'R' : '.';
-    result[3] = GET_BIT16(pindex, 12)  ? 'B' : '.';
-    result[4] = GET_BIT16(pindex, 11)  ? 'B' : '.';
-    result[5] = GET_BIT16(pindex, 10)  ? 'N' : '.';
-    result[6] = GET_BIT16(pindex,  9)  ? 'N' : '.';
-    result[7] = GET_BIT16(pindex,  8)  ? 'P' : '.';
-    result[8] = GET_BIT16(pindex,  7)  ? 'P' : '.';
-    result[9] = GET_BIT16(pindex,  6)  ? 'P' : '.';
-    result[10] = GET_BIT16(pindex, 5) ? 'P' : '.';
-    result[11] = GET_BIT16(pindex, 4) ? 'P' : '.';
-    result[12] = GET_BIT16(pindex, 3) ? 'P' : '.';
-    result[13] = GET_BIT16(pindex, 2) ? 'P' : '.';
-    result[14] = GET_BIT16(pindex, 1) ? 'P' : '.';
+    result[0] = GET_BIT16(pindex, 15 - 1)  ? 'Q' : '.';
+    result[1] = GET_BIT16(pindex, 14 - 1)  ? 'R' : '.';
+    result[2] = GET_BIT16(pindex, 13 - 1)  ? 'R' : '.';
+    result[3] = GET_BIT16(pindex, 12 - 1)  ? 'B' : '.';
+    result[4] = GET_BIT16(pindex, 11 - 1)  ? 'B' : '.';
+    result[5] = GET_BIT16(pindex, 10 - 1)  ? 'N' : '.';
+    result[6] = GET_BIT16(pindex,  9 - 1)  ? 'N' : '.';
+    result[7] = GET_BIT16(pindex,  8 - 1)  ? 'P' : '.';
+    result[8] = GET_BIT16(pindex,  7 - 1)  ? 'P' : '.';
+    result[9] = GET_BIT16(pindex,  6 - 1)  ? 'P' : '.';
+    result[10] = GET_BIT16(pindex, 5 - 1) ? 'P' : '.';
+    result[11] = GET_BIT16(pindex, 4 - 1) ? 'P' : '.';
+    result[12] = GET_BIT16(pindex, 3 - 1) ? 'P' : '.';
+    result[13] = GET_BIT16(pindex, 2 - 1) ? 'P' : '.';
+    result[14] = GET_BIT16(pindex, 1 - 1) ? 'P' : '.';
 
     PG_RETURN_CSTRING(result);
 }
@@ -838,18 +901,19 @@ static int _board_compare(const Board *a, const Board *b)
         return (memcmp(a, b, sizeof(a) + a->pcount));
 }
 
-static unsigned short _board_pieces(const Board * b, side_type go)
+static char *_board_pieces(const Board * b, side_type go)
 {
 
-    unsigned short      result=0;
+    char                *result=palloc(PIECE_INDEX_SUM+1); // 15 pieces without K
     unsigned int        i;
-    unsigned char       j=0, k, l, n, subject, target;
-    const int           *pieces = go==WHITE ? WHITE_PIECES : BLACK_PIECES;
+    unsigned char       j=0, k, l, n;
+    cpiece_type         subject, target;
+    const cpiece_type    *pieces = go==WHITE ? WHITE_PIECES : BLACK_PIECES;
 
     if (b->pcount <=0)
         CH_ERROR("board has no pieces");
 
-    for (i=0; i<5; i++) {
+    for (i=0; i<PIECE_INDEX_MAX; i++) {
         n = 0;
         target = pieces[i];
         //CH_NOTICE("target: %c", _piece_out(target));
@@ -858,19 +922,20 @@ static unsigned short _board_pieces(const Board * b, side_type go)
             subject = GET_PIECE(b->pieces, k);
             if (subject == target) {
                 n++;
-                if (n >= PIECE_COUNTS[i])
+                if (n >= PIECE_INDEX_COUNTS[i])
                     break;
             }
         }
         //CH_NOTICE("n: %i", n);
-        for (l=0; l<PIECE_COUNTS[i]; l++) {
+        for (l=0; l<PIECE_INDEX_COUNTS[i]; l++) {
             if (l<n) {
-                //CH_NOTICE("set bit %i for piece: %c", PIECE_INDEX_MAX - j, _piece_out(target));
-                SET_BIT16(result, PIECE_INDEX_MAX - j);
+                result[j++] = _piece_type_char(_piece_type(target));
+            } else {
+                result[j++] = _piece_type_char(NO_PIECE);
             }
-            j++;
         }
     }
+    result[PIECE_INDEX_SUM] = '\0';
     return result;
 }
 
@@ -1229,7 +1294,7 @@ pieces(PG_FUNCTION_ARGS)
     const Board     *b = (Board *) PG_GETARG_POINTER(0);
     const side_type go = PG_GETARG_CHAR(1);
 
-    PG_RETURN_INT16(_board_pieces(b, go));
+    PG_RETURN_INT16(_pindex_in(_board_pieces(b, go)));
 }
 
 /*}}}*/

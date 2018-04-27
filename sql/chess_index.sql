@@ -65,14 +65,9 @@ CREATE FUNCTION pindex_out(pindex)
 RETURNS cstring AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
 
 CREATE TYPE pindex(
-    INPUT          = pindex_in,
-    OUTPUT         = pindex_out,
-
-    LIKE           = int2,
-    INTERNALLENGTH = 2,     
-    ALIGNMENT      = int2,
-    STORAGE        = PLAIN,
-    PASSEDBYVALUE         
+     INPUT          = pindex_in
+    ,OUTPUT         = pindex_out
+    ,LIKE           = int2
 );
 
 CREATE FUNCTION pindex_to_int32(pindex)
