@@ -19,6 +19,9 @@
  * 		defines
  ********************************************************/
 /*{{{*/
+
+// function info
+///*{{{*/
 PG_FUNCTION_INFO_V1(char_to_int);
 
 PG_FUNCTION_INFO_V1(board_in);
@@ -31,15 +34,18 @@ PG_FUNCTION_INFO_V1(board_gt);
 PG_FUNCTION_INFO_V1(board_le);
 PG_FUNCTION_INFO_V1(board_ge);
 PG_FUNCTION_INFO_V1(board_hash);
-PG_FUNCTION_INFO_V1(piece_count);
-PG_FUNCTION_INFO_V1(board_go);
-PG_FUNCTION_INFO_V1(board_pieces);
+
+// board functions
+PG_FUNCTION_INFO_V1(pcount);
+PG_FUNCTION_INFO_V1(side);
+PG_FUNCTION_INFO_V1(pieces);
 
 PG_FUNCTION_INFO_V1(pindex_in);
 PG_FUNCTION_INFO_V1(pindex_out);
 
 PG_FUNCTION_INFO_V1(side_in);
 PG_FUNCTION_INFO_V1(side_out);
+PG_FUNCTION_INFO_V1(not);
 
 PG_FUNCTION_INFO_V1(square_in);
 PG_FUNCTION_INFO_V1(square_out);
@@ -64,7 +70,9 @@ PG_FUNCTION_INFO_V1(adiagonal_in);
 PG_FUNCTION_INFO_V1(adiagonal_out);
 PG_FUNCTION_INFO_V1(square_to_adiagonal);
 
-
+/*}}}*/
+// defines
+///*{{{*/
 #define CHECK_BIT(board, k) ((1ull << k) & board)
 #define GET_PIECE(pieces, k) k%2 ? pieces[k/2] & 0x0f : (pieces[k/2] & 0xf0) >> 4
 #define SET_PIECE(pieces, k, v) pieces[k/2] = k%2 ? ( (pieces[k/2] & 0xF0) | (v & 0xF)) : ((pieces[k/2] & 0x0F) | (v & 0xF) << 4)
@@ -120,6 +128,23 @@ PG_FUNCTION_INFO_V1(square_to_adiagonal);
 #define KING        0x6
 #define MAX_PIECE   KING
 
+#define CH_NOTICE(...) ereport(NOTICE, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
+#define CH_ERROR(...) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
+#define CH_DEBUG5(...) ereport(DEBUG5, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__))) // most detail
+#define CH_DEBUG4(...) ereport(DEBUG4, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
+#define CH_DEBUG3(...) ereport(DEBUG3, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
+#define CH_DEBUG2(...) ereport(DEBUG2, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
+#define CH_DEBUG1(...) ereport(DEBUG1, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__))) // least detail
+
+#define BAD_TYPE_IN(type, input) ereport( \
+        ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), \
+            errmsg("invalid input syntax for %s: \"%s\"", type, input)))
+
+#define BAD_TYPE_OUT(type, input) ereport( \
+        ERROR, (errcode(ERRCODE_DATA_CORRUPTED), \
+            errmsg("corrupt internal data for %s: \"%d\"", type, input)))/*}}}*/
+// types
+/*{{{*/
 typedef enum {BLACK, WHITE} side_type;
 
 const int             PIECES[] = {QUEEN, ROOK, BISHOP, KNIGHT, PAWN};
@@ -159,21 +184,6 @@ static int _board_fen(const Board * b, char * str);
 PG_MODULE_MAGIC;
 #endif
 
-#define CH_NOTICE(...) ereport(NOTICE, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
-#define CH_ERROR(...) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
-#define CH_DEBUG5(...) ereport(DEBUG5, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__))) // most detail
-#define CH_DEBUG4(...) ereport(DEBUG4, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
-#define CH_DEBUG3(...) ereport(DEBUG3, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
-#define CH_DEBUG2(...) ereport(DEBUG2, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
-#define CH_DEBUG1(...) ereport(DEBUG1, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__))) // least detail
-
-#define BAD_TYPE_IN(type, input) ereport( \
-			ERROR, (errcode(ERRCODE_INVALID_TEXT_REPRESENTATION), \
-			errmsg("invalid input syntax for %s: \"%s\"", type, input)))
-
-#define BAD_TYPE_OUT(type, input) ereport( \
-			ERROR, (errcode(ERRCODE_DATA_CORRUPTED), \
-			errmsg("corrupt internal data for %s: \"%d\"", type, input)))
 
 /*
    chess=# select to_hex(idx), idx::bit(4)  from generate_series(0, 15) as idx;
@@ -211,7 +221,7 @@ square numbers
  *
  *      a       b       c       d       e       f       g       h   
  */
-
+/*}}}*/
 /********************************************************
 * 		util
 ********************************************************/
@@ -491,30 +501,30 @@ int_to_square(PG_FUNCTION_ARGS)
 * 		piece
 ********************************************************/
 /*{{{*/
+
 static char	_piece_out(char piece)
 {
 
     char        val;
 	switch (piece) {
-        case 1: val='P'; break;
-        case 2: val='p'; break;
-        case 3: val='N'; break;
-        case 4: val='n'; break;
-        case 5: val='B'; break;
-        case 6: val='b'; break;
-        case 7: val='R'; break;
-        case 8: val='r'; break;
-        case 9: val='Q'; break;
-        case 10: val='q'; break;
-        case 11: val='K'; break;
-        case 12: val='k'; break;
+        case WHITE_PAWN:    val='P'; break;
+        case WHITE_ROOK:    val='R'; break;
+        case WHITE_KNIGHT:  val='N'; break;
+        case WHITE_BISHOP:  val='B'; break;
+        case WHITE_QUEEN:   val='Q'; break;
+        case WHITE_KING:    val='K'; break;
+        case BLACK_PAWN:    val='p'; break;
+        case BLACK_ROOK:    val='r'; break;
+        case BLACK_KNIGHT:  val='n'; break;
+        case BLACK_BISHOP:  val='b'; break;
+        case BLACK_QUEEN:   val='q'; break;
+        case BLACK_KING:    val='k'; break;
 		default:
 			BAD_TYPE_OUT("piece", piece);
 			break;
 	}
 	return val;
 }
-
 
 Datum
 piece_in(PG_FUNCTION_ARGS)
@@ -526,18 +536,18 @@ piece_in(PG_FUNCTION_ARGS)
 		BAD_TYPE_IN("piece", str);
 
 	switch (str[0]) {
-        case 'P': val=1; break;
-        case 'p': val=2; break;
-        case 'N': val=3; break;
-        case 'n': val=4; break;
-        case 'B': val=5; break;
-        case 'b': val=6; break;
-        case 'R': val=7; break;
-        case 'r': val=8; break;
-        case 'Q': val=9; break;
-        case 'q': val=10; break;
-        case 'K': val=11; break;
-        case 'k': val=12; break;
+        case 'P': val=WHITE_PAWN; break;
+        case 'R': val=WHITE_ROOK; break;
+        case 'N': val=WHITE_KNIGHT; break;
+        case 'B': val=WHITE_BISHOP; break;
+        case 'Q': val=WHITE_QUEEN; break;
+        case 'K': val=WHITE_KING; break;
+        case 'p': val=BLACK_PAWN; break;
+        case 'r': val=BLACK_ROOK; break;
+        case 'n': val=BLACK_KNIGHT; break;
+        case 'b': val=BLACK_BISHOP; break;
+        case 'q': val=BLACK_QUEEN; break;
+        case 'k': val=BLACK_KING; break;
 		default:
 			BAD_TYPE_IN("piece", str);
 			break;
@@ -798,15 +808,17 @@ pindex_out(PG_FUNCTION_ARGS)
 }
 
 /*}}}*/
-/*{{{*/ /* 		board
+/********************************************************
+ ** 		board
  ********************************************************/
+/*{{{*/
 /* 
  * This is a really nice compact way to store fen without Huffman compresion:
  * https://codegolf.stackexchange.com/questions/19397/smallest-chess-board-compression
  * second answer : 192 bits
  */
  
-//  static internal
+//  static internal/*{{{*/
 
 static int _board_compare(const Board *a, const Board *b) 
 {
@@ -822,14 +834,9 @@ static unsigned short _board_pieces(const Board * b, side_type go)
 {
 
     unsigned short      result=0;
-    unsigned char       i, j=0, k, l, n, subject, target;
+    unsigned int        i;
+    unsigned char       j=0, k, l, n, subject, target;
     const int           *pieces = go==WHITE ? WHITE_PIECES : BLACK_PIECES;
-        /*
-           const int             PIECE_COUNTS[] = {1, 2, 2, 2, 8}
-           const int             PIECES[] = {QUEEN, ROOK, BISHOP, KNIGHT, PAWN}
-           const int             WHITE_PIECES[] = {WHITE_QUEEN, WHITE_ROOK, WHITE_BISHOP, WHITE_KNIGHT, WHITE_PAWN}
-           const int             BLACK_PIECES[] = {BLACK_QUEEN, BLACK_ROOK, BLACK_BISHOP, BLACK_KNIGHT, BLACK_PAWN}
-           */
 
     if (b->pcount <=0)
         CH_ERROR("board has no pieces");
@@ -837,6 +844,7 @@ static unsigned short _board_pieces(const Board * b, side_type go)
     for (i=0; i<5; i++) {
         n = 0;
         target = pieces[i];
+        CH_NOTICE("target: %c", _piece_out(target));
 
         for (k=0; k<b->pcount; k++) {
             subject = GET_PIECE(b->pieces, k);
@@ -846,8 +854,10 @@ static unsigned short _board_pieces(const Board * b, side_type go)
                     break;
             }
         }
+        CH_NOTICE("n: %i", n);
         for (l=0; l<PIECE_COUNTS[i]; l++) {
-            if (l<=n) {
+            if (l<n) {
+                CH_NOTICE("set bit %i for piece: %c", PIECE_INDEX_MAX - j, _piece_out(target));
                 SET_BIT16(result, PIECE_INDEX_MAX - j);
             }
             j++;
@@ -951,8 +961,8 @@ static int _board_fen(const Board * b, char * str)
 }
 /*}}}*/
 //-------------------------------------------
-//              operators
-/*{{{*/
+//              operators/*{{{*/
+
 Datum
 board_cmp(PG_FUNCTION_ARGS)
 {
@@ -1022,8 +1032,8 @@ board_hash(PG_FUNCTION_ARGS)
 
 /*}}}*/
 //-------------------------------------------
-//              constructors
-/*{{{*/
+//              constructors/*{{{*/
+
 Datum
 board_in(PG_FUNCTION_ARGS)
 {
@@ -1189,28 +1199,24 @@ board_out(PG_FUNCTION_ARGS)
 }
 /*}}}*/
 //-------------------------------------------
-//              functions
-/*{{{*/
+//              functions/*{{{*/
+
 Datum
-piece_count(PG_FUNCTION_ARGS)
+pcount(PG_FUNCTION_ARGS)
 {
     const Board     *b = (Board *) PG_GETARG_POINTER(0);
     PG_RETURN_CSTRING(b->pcount);
 }
 
 Datum
-board_go(PG_FUNCTION_ARGS)
+side(PG_FUNCTION_ARGS)
 {
     const Board     *b = (Board *) PG_GETARG_POINTER(0);
-    char            *str = palloc(2);
-
-    str[0] = b->whitesgo ? 'w' : 'b';
-    str[1] = '\0';
-    PG_RETURN_CSTRING(str);
+    PG_RETURN_CHAR(b->whitesgo ? WHITE : BLACK);
 }
 
 Datum
-board_pieces(PG_FUNCTION_ARGS)
+pieces(PG_FUNCTION_ARGS)
 {
     const Board     *b = (Board *) PG_GETARG_POINTER(0);
     const side_type go = PG_GETARG_CHAR(1);
@@ -1219,7 +1225,7 @@ board_pieces(PG_FUNCTION_ARGS)
 }
 
 /*}}}*/
-
+/*}}}*/
 /********************************************************
  * 		side
  ********************************************************/
@@ -1269,5 +1275,17 @@ side_out(PG_FUNCTION_ARGS)
 
     PG_RETURN_CSTRING(result);
 }
+
+Datum
+not(PG_FUNCTION_ARGS)
+{
+    char			side = PG_GETARG_CHAR(0);
+
+    if (side==BLACK) PG_RETURN_CHAR(WHITE);
+    else if (side==WHITE) PG_RETURN_CHAR(BLACK);
+    else BAD_TYPE_OUT("side", side);
+
+}
+
 
 /*}}}*/

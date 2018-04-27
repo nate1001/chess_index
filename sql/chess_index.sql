@@ -5,13 +5,10 @@
 
 -- set client_min_messages=DEBUG5;
 
-DROP TYPE IF EXISTS tomove CASCADE;
-CREATE TYPE tomove AS ENUM ('w', 'b');
-
 /****************************************************************************
 -- side : white or black
  ****************************************************************************/
-
+/*{{{*/
 CREATE FUNCTION side_in(cstring)
 RETURNS side AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
 
@@ -29,10 +26,62 @@ CREATE TYPE side(
     PASSEDBYVALUE         
 );
 
+CREATE FUNCTION side_eq(side, side)
+RETURNS bool LANGUAGE internal IMMUTABLE as 'chareq';
+CREATE FUNCTION side_ne(side, side)
+RETURNS bool LANGUAGE internal IMMUTABLE as 'charne';
+CREATE FUNCTION "not"(side)
+RETURNS side AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+
+CREATE OPERATOR = (
+    LEFTARG = side,
+    RIGHTARG = side,
+    PROCEDURE = side_eq,
+    COMMUTATOR = '=',
+    NEGATOR = '<>',
+    RESTRICT = eqsel,
+    JOIN = eqjoinsel,
+    HASHES, MERGES
+);
+
+CREATE OPERATOR <> (
+    LEFTARG = side,
+    RIGHTARG = side,
+    PROCEDURE = side_ne,
+    COMMUTATOR = '<>',
+    NEGATOR = '=',
+    RESTRICT = neqsel,
+    JOIN = neqjoinsel
+);
+/*}}}*//*}}}*/
+/****************************************************************************
+-- pindex : piece index
+ ****************************************************************************/
+/*{{{*/
+CREATE FUNCTION pindex_in(cstring)
+RETURNS pindex
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION pindex_out(pindex)
+RETURNS cstring
+AS '$libdir/chess_index'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE TYPE pindex(
+    INPUT          = pindex_in,
+    OUTPUT         = pindex_out,
+
+    INTERNALLENGTH = 2,     
+    ALIGNMENT      = int2,
+    STORAGE        = PLAIN,
+    PASSEDBYVALUE         
+);
+/*}}}*/
 /****************************************************************************
 -- square:
  ****************************************************************************/
-
+/*{{{*/
 CREATE FUNCTION square_in(cstring)
 RETURNS square
 AS '$libdir/chess_index'
@@ -159,11 +208,11 @@ CREATE OPERATOR CLASS hash_square_ops
         OPERATOR        1       = ,
         FUNCTION        1       hash_square(square);
 
-
+/*}}}*/
 /****************************************************************************
 -- piece
 ****************************************************************************/
-
+/*{{{*/
 CREATE FUNCTION piece_in(cstring)
 RETURNS piece
 AS '$libdir/chess_index'
@@ -217,11 +266,11 @@ DEFAULT FOR TYPE piece USING hash AS
 OPERATOR        1       = ,
 FUNCTION        1       hash_square(piece);
 
-
+/*}}}*/
 /****************************************************************************
--- fen/board
+-- board: displays as fen, holds position
  ****************************************************************************/
-
+/*{{{*/
 CREATE FUNCTION board_in(cstring)
 RETURNS board AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
 
@@ -234,11 +283,11 @@ CREATE TYPE board(
     STORAGE        = PLAIN
 );
 
-CREATE FUNCTION piece_count(board)
+CREATE FUNCTION pcount(board)
 RETURNS int AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
-CREATE FUNCTION board_go(board)
-RETURNS tomove AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
-CREATE FUNCTION board_pieces(board, side)
+CREATE FUNCTION side(board)
+RETURNS side AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+CREATE FUNCTION pieces(board, side)
 RETURNS pindex AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
 
 CREATE FUNCTION board_eq(board, board)
@@ -334,11 +383,11 @@ DEFAULT FOR TYPE board USING hash AS
 OPERATOR        1       = ,
 FUNCTION        1       board_hash(board);
 
-
+/*}}}*/
 /****************************************************************************
 -- file
  ****************************************************************************/
-
+/*{{{*/
 CREATE FUNCTION cfile_in(cstring)
 RETURNS cfile 
 AS '$libdir/chess_index'
@@ -372,11 +421,11 @@ AS '$libdir/chess_index'
 LANGUAGE C IMMUTABLE STRICT;
 CREATE CAST (cfile AS int4) WITH FUNCTION char_to_int(cfile);
 
-
+/*}}}*/
 /****************************************************************************
 -- rank
  ****************************************************************************/
-
+/*{{{*/
 CREATE FUNCTION rank_in(cstring)
 RETURNS rank
 AS '$libdir/chess_index'
@@ -409,11 +458,11 @@ RETURNS int4
 AS '$libdir/chess_index'
 LANGUAGE C IMMUTABLE STRICT;
 CREATE CAST (rank AS int4) WITH FUNCTION char_to_int(rank);
-
+/*}}}*/
 /****************************************************************************
 -- diagonal
  ****************************************************************************/
-
+/*{{{*/
 CREATE FUNCTION diagonal_in(cstring)
 RETURNS diagonal
 AS '$libdir/chess_index'
@@ -446,74 +495,13 @@ RETURNS int4
 AS '$libdir/chess_index'
 LANGUAGE C IMMUTABLE STRICT;
 CREATE CAST (diagonal AS int4) WITH FUNCTION char_to_int(diagonal);
-
+/*}}}*/
 /****************************************************************************
 -- adiagonal
- ****************************************************************************/
-
-CREATE FUNCTION adiagonal_in(cstring)
-RETURNS adiagonal
-AS '$libdir/chess_index'
-LANGUAGE C IMMUTABLE STRICT;
-
-CREATE FUNCTION adiagonal_out(adiagonal)
-RETURNS cstring
-AS '$libdir/chess_index'
-LANGUAGE C IMMUTABLE STRICT;
-
-CREATE TYPE adiagonal(
-    INPUT          = adiagonal_in,
-    OUTPUT         = adiagonal_out,
-
-    INTERNALLENGTH = 1,     -- use 4 bytes to store data
-    ALIGNMENT      = char,  -- align to 4 bytes
-    STORAGE        = PLAIN, -- always store data inline uncompressed (not toasted)
-    PASSEDBYVALUE           -- pass data by value rather than by reference
-);
-
-
-CREATE FUNCTION square_to_adiagonal(square)
-RETURNS adiagonal
-AS '$libdir/chess_index'
-LANGUAGE C IMMUTABLE STRICT;
-CREATE CAST (square AS adiagonal) WITH FUNCTION square_to_adiagonal(square);
-
-CREATE FUNCTION char_to_int(adiagonal)
-RETURNS int4
-AS '$libdir/chess_index'
-LANGUAGE C IMMUTABLE STRICT;
-CREATE CAST (adiagonal AS int4) WITH FUNCTION char_to_int(adiagonal);
-
-
-/****************************************************************************
--- pindex : piece index
- ****************************************************************************/
-
-CREATE FUNCTION pindex_in(cstring)
-RETURNS pindex
-AS '$libdir/chess_index'
-LANGUAGE C IMMUTABLE STRICT;
-
-CREATE FUNCTION pindex_out(pindex)
-RETURNS cstring
-AS '$libdir/chess_index'
-LANGUAGE C IMMUTABLE STRICT;
-
-CREATE TYPE pindex(
-    INPUT          = pindex_in,
-    OUTPUT         = pindex_out,
-
-    INTERNALLENGTH = 2,     
-    ALIGNMENT      = int2,
-    STORAGE        = PLAIN,
-    PASSEDBYVALUE         
-);
-
-
 /****************************************************************************
 -- sql functions
  ****************************************************************************/
-
+/*{{{*/
 CREATE OR REPLACE FUNCTION pretty(text, uni bool default false, fen bool default true)
 RETURNS text AS $$
     select replace(replace(replace(replace(replace(replace(replace(replace(
@@ -553,4 +541,4 @@ CREATE OR REPLACE FUNCTION invert(board)
 RETURNS text AS $$
     select translate($1::text, 'KQRBNPkqrbnpwb', 'kqrbnpKQRBNPbw')
 $$ LANGUAGE SQL IMMUTABLE STRICT;
-
+/*}}}*/
