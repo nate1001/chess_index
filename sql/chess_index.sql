@@ -59,24 +59,119 @@ CREATE OPERATOR <> (
  ****************************************************************************/
 /*{{{*/
 CREATE FUNCTION pindex_in(cstring)
-RETURNS pindex
-AS '$libdir/chess_index'
-LANGUAGE C IMMUTABLE STRICT;
+RETURNS pindex AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
 
 CREATE FUNCTION pindex_out(pindex)
-RETURNS cstring
-AS '$libdir/chess_index'
-LANGUAGE C IMMUTABLE STRICT;
+RETURNS cstring AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
 
 CREATE TYPE pindex(
     INPUT          = pindex_in,
     OUTPUT         = pindex_out,
 
+    LIKE           = int2,
     INTERNALLENGTH = 2,     
     ALIGNMENT      = int2,
     STORAGE        = PLAIN,
     PASSEDBYVALUE         
 );
+
+CREATE FUNCTION pindex_to_int32(pindex)
+RETURNS int4 AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+CREATE CAST (pindex as int4) WITH FUNCTION pindex_to_int32;
+
+CREATE FUNCTION pindex_eq(pindex, pindex)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'int2eq';
+CREATE FUNCTION pindex_ne(pindex, pindex)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'int2ne';
+CREATE FUNCTION pindex_lt(pindex, pindex)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'int2lt';
+CREATE FUNCTION pindex_le(pindex, pindex)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'int2le';
+CREATE FUNCTION pindex_gt(pindex, pindex)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'int2gt';
+CREATE FUNCTION pindex_ge(pindex, pindex)
+RETURNS boolean LANGUAGE internal IMMUTABLE as 'int2ge';
+CREATE FUNCTION pindex_cmp(pindex, pindex)
+RETURNS integer LANGUAGE internal IMMUTABLE AS 'btint2cmp';
+CREATE FUNCTION hash_pindex(pindex)
+RETURNS integer LANGUAGE internal IMMUTABLE AS 'hashint2';
+
+CREATE OPERATOR = (
+    LEFTARG = pindex,
+    RIGHTARG = pindex,
+    PROCEDURE = pindex_eq,
+    COMMUTATOR = '=',
+    NEGATOR = '<>',
+    RESTRICT = eqsel,
+    JOIN = eqjoinsel,
+    HASHES, MERGES
+);
+
+CREATE OPERATOR <> (
+    LEFTARG = pindex,
+    RIGHTARG = pindex,
+    PROCEDURE = pindex_ne,
+    COMMUTATOR = '<>',
+    NEGATOR = '=',
+    RESTRICT = neqsel,
+    JOIN = neqjoinsel
+);
+
+CREATE OPERATOR < (
+  LEFTARG = pindex,
+  RIGHTARG = pindex,
+  PROCEDURE = pindex_lt,
+  COMMUTATOR = > ,
+  NEGATOR = >= ,
+  RESTRICT = scalarltsel,
+  JOIN = scalarltjoinsel
+);
+
+CREATE OPERATOR <= (
+  LEFTARG = pindex,
+  RIGHTARG = pindex,
+  PROCEDURE = pindex_le,
+  COMMUTATOR = >= ,
+  NEGATOR = > ,
+  RESTRICT = scalarltsel,
+  JOIN = scalarltjoinsel
+);
+
+CREATE OPERATOR > (
+  LEFTARG = pindex,
+  RIGHTARG = pindex,
+  PROCEDURE = pindex_gt,
+  COMMUTATOR = < ,
+  NEGATOR = <= ,
+  RESTRICT = scalargtsel,
+  JOIN = scalargtjoinsel
+);
+
+CREATE OPERATOR >= (
+  LEFTARG = pindex,
+  RIGHTARG = pindex,
+  PROCEDURE = pindex_ge,
+  COMMUTATOR = <= ,
+  NEGATOR = < ,
+  RESTRICT = scalargtsel,
+  JOIN = scalargtjoinsel
+);
+
+CREATE OPERATOR CLASS btree_pindex_ops
+DEFAULT FOR TYPE pindex USING btree
+AS
+        OPERATOR        1       <  ,
+        OPERATOR        2       <= ,
+        OPERATOR        3       =  ,
+        OPERATOR        4       >= ,
+        OPERATOR        5       >  ,
+        FUNCTION        1       pindex_cmp(pindex, pindex);
+
+CREATE OPERATOR CLASS hash_pindex_ops
+DEFAULT FOR TYPE pindex USING hash AS
+OPERATOR        1       = ,
+FUNCTION        1       hash_pindex(pindex);
+
 /*}}}*/
 /****************************************************************************
 -- square:
@@ -102,18 +197,12 @@ CREATE TYPE square(
 	PASSEDBYVALUE         
 );
 
-CREATE FUNCTION char_to_int(square)
-RETURNS int4
-AS '$libdir/chess_index'
-LANGUAGE C IMMUTABLE STRICT;
-CREATE CAST (square AS int4) WITH FUNCTION char_to_int(square);
-
-
-CREATE FUNCTION int_to_square(int4)
-RETURNS square
-AS '$libdir/chess_index'
-LANGUAGE C IMMUTABLE STRICT;
-CREATE CAST (int4 AS square) WITH FUNCTION int_to_square(int4);
+CREATE CAST ("char" AS square) WITHOUT FUNCTION;
+CREATE CAST (square AS "char") WITHOUT FUNCTION;
+CREATE FUNCTION int_to_square(int) RETURNS square AS $$ select $1::"char"::square $$ LANGUAGE SQL IMMUTABLE STRICT;
+CREATE FUNCTION square_to_int(square) RETURNS int AS $$ select $1::"char"::int $$ LANGUAGE SQL IMMUTABLE STRICT;
+CREATE CAST (int AS square) WITH FUNCTION int_to_square(int);
+CREATE CAST (square AS int) WITH FUNCTION square_to_int(square);
 
 CREATE FUNCTION square_eq(square, square)
 RETURNS boolean LANGUAGE internal IMMUTABLE as 'chareq';
@@ -496,8 +585,7 @@ AS '$libdir/chess_index'
 LANGUAGE C IMMUTABLE STRICT;
 CREATE CAST (diagonal AS int4) WITH FUNCTION char_to_int(diagonal);
 /*}}}*/
-/****************************************************************************
--- adiagonal
+
 /****************************************************************************
 -- sql functions
  ****************************************************************************/
@@ -508,26 +596,26 @@ RETURNS text AS $$
             translate
             (
                  split_part($1, ' ', 1)
-                , case when $2 then '/prnbqkPRNBQK' else '/' end
+                , case when $2 then '/kqrbnpKQRBNP' else '/' end
                 , case when $2
-                    then E'\n�~Y~_�~Y~\�~Y~^�~Y~]�~Y~[�~Y~Z�~Y~Y�~Y~V�~Y~X�~Y~W�~Y~U�~Y~T'
+                    then E'\n' || U&'\2654\2655\2656\2657\2658\2659\265A\265B\265C\265D\265E\265F'
                     else E'\n'  
                   end
             )
-            , '8', '        ') 
-            , '7', '       ')
-            , '6', '      ') 
-            , '5', '     ')
-            , '4', '    ') 
-            , '3', '   ') 
-            , '2', '  ') 
-            , '1', ' ')
+            , '8', case when not $2 then '        ' else U&'\3000\3000\3000\3000\3000\3000\3000\3000' end) 
+            , '7', case when not $2 then '       ' else U&'\3000\3000\3000\3000\3000\3000\3000' end) 
+            , '6', case when not $2 then '      ' else U&'\3000\3000\3000\3000\3000\3000' end) 
+            , '5', case when not $2 then '     ' else U&'\3000\3000\3000\3000\3000' end) 
+            , '4', case when not $2 then '    ' else U&'\3000\3000\3000\3000' end) 
+            , '3', case when not $2 then '   ' else U&'\3000\3000\3000' end) 
+            , '2', case when not $2 then '  ' else U&'\3000\3000' end) 
+            , '1', case when not $2 then ' ' else U&'\3000' end) 
         || E'\n' || split_part($1, ' ', 2)
         || '  '  || split_part($1, ' ', 3)
         || '  '  || split_part($1, ' ', 4)
         || '  '  || split_part($1, ' ', 5)
         || case when $3 then E'\n' || split_part($1::text, ' ', 1) else '' end
-        || e'\n'
+        || E'\n\n'
         
     ;
 $$ LANGUAGE SQL IMMUTABLE STRICT;

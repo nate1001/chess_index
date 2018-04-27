@@ -5,3 +5,6 @@ data/*.pgn
 data/*.bz2
 *.swp
 *.log
+
+regression.out
+regression.diffs

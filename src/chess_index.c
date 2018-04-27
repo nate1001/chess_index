@@ -42,6 +42,7 @@ PG_FUNCTION_INFO_V1(pieces);
 
 PG_FUNCTION_INFO_V1(pindex_in);
 PG_FUNCTION_INFO_V1(pindex_out);
+PG_FUNCTION_INFO_V1(pindex_to_int32);
 
 PG_FUNCTION_INFO_V1(side_in);
 PG_FUNCTION_INFO_V1(side_out);
@@ -311,7 +312,7 @@ char_to_int(PG_FUNCTION_ARGS)
     PG_RETURN_INT32((int32)c);
 }/*}}}*//*}}}*/
 /********************************************************
- * 		files
+ * 		file
  ********************************************************/
 static char _cfile_in(char f) /*{{{*/
 {
@@ -350,7 +351,7 @@ cfile_out(PG_FUNCTION_ARGS)
 
 /*}}}*/
 /********************************************************
- * 		ranks
+ * 		rank
  ********************************************************/
 /*{{{*/
 static char _rank_in(char r) 
@@ -807,9 +808,16 @@ pindex_out(PG_FUNCTION_ARGS)
     PG_RETURN_CSTRING(result);
 }
 
+Datum
+pindex_to_int32(PG_FUNCTION_ARGS)
+{
+    unsigned short  pindex = PG_GETARG_INT16(0);
+    PG_RETURN_INT32((int32)pindex);
+}
+
 /*}}}*/
 /********************************************************
- ** 		board
+ **     board
  ********************************************************/
 /*{{{*/
 /* 
@@ -844,7 +852,7 @@ static unsigned short _board_pieces(const Board * b, side_type go)
     for (i=0; i<5; i++) {
         n = 0;
         target = pieces[i];
-        CH_NOTICE("target: %c", _piece_out(target));
+        //CH_NOTICE("target: %c", _piece_out(target));
 
         for (k=0; k<b->pcount; k++) {
             subject = GET_PIECE(b->pieces, k);
@@ -854,10 +862,10 @@ static unsigned short _board_pieces(const Board * b, side_type go)
                     break;
             }
         }
-        CH_NOTICE("n: %i", n);
+        //CH_NOTICE("n: %i", n);
         for (l=0; l<PIECE_COUNTS[i]; l++) {
             if (l<n) {
-                CH_NOTICE("set bit %i for piece: %c", PIECE_INDEX_MAX - j, _piece_out(target));
+                //CH_NOTICE("set bit %i for piece: %c", PIECE_INDEX_MAX - j, _piece_out(target));
                 SET_BIT16(result, PIECE_INDEX_MAX - j);
             }
             j++;
