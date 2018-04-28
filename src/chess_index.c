@@ -52,6 +52,11 @@ PG_FUNCTION_INFO_V1(square_in);
 PG_FUNCTION_INFO_V1(square_out);
 PG_FUNCTION_INFO_V1(int_to_square);
 
+PG_FUNCTION_INFO_V1(piecesquare_in);
+PG_FUNCTION_INFO_V1(piecesquare_out);
+PG_FUNCTION_INFO_V1(piecesquare_piece);
+PG_FUNCTION_INFO_V1(piecesquare_square);
+
 PG_FUNCTION_INFO_V1(piece_in);
 PG_FUNCTION_INFO_V1(piece_out);
 
@@ -87,21 +92,21 @@ PG_FUNCTION_INFO_V1(square_to_adiagonal);
 #define GET_BIT32(i32, k) (i32 >> (k)) & (int32)1
 #define GET_BIT64(i64, k) (i64 >> (k)) & (int64)1
 
+#define SET_PS(i16, p, s) (i16 = (s | (p & 0xFF) <<8))
+#define GET_PS_PIECE(i16) ((i16 & 0xff00)>>8)
+#define GET_PS_SQUARE(i16) (i16 & 0x00ff)
+
+#define FEN_MAX 100
+#define PIECES_MAX 32
+#define SQUARE_MAX 64
+
 #define SET_BOARD(board, k) board |= (1ull << (k--));
 #define TO_SQUARE_IDX(i)  (i/8)*8 + (8 - i%8) - 1;
+#define MAKE_SQUARE(file, rank, str) {str[0]=file; str[1]=rank;}
 #define CHAR_CFILE(s) 'a' + TO_FILE(s)
 #define CHAR_RANK(s) '1' + TO_RANK(s)
-#define MAKE_SQUARE(file, rank, str) {str[0]=file; str[1]=rank;}
 #define TO_RANK(s) s/8
 #define TO_FILE(s) s%8
-
-#define MAX_FEN 100
-#define MAX_PIECES 32
-#define MAX_MOVES 192
-#define MAX_SAN 10
-#define BOARD_SIZE 64
-#define RANK_SIZE 8
-
 
 #define CH_NOTICE(...) ereport(NOTICE, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
 #define CH_ERROR(...) ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR), errmsg(__VA_ARGS__)))
@@ -155,7 +160,7 @@ typedef struct {
     unsigned int          _unused: 14;
     int64                 board;
 #ifdef EXTRA_DEBUG
-	char			orig_fen[MAX_FEN];
+	char			orig_fen[FEN_MAX];
 #endif
     unsigned char   pieces[FLEXIBLE_ARRAY_MEMBER];
 } Board;
@@ -254,7 +259,7 @@ static char _cpiece_type_char(const cpiece_type p)
         case BLACK_BISHOP:  result='b'; break;
         case BLACK_ROOK:    result='r'; break;
         case BLACK_QUEEN:   result='q'; break;
-        case BLACK_KING:    result='q'; break;
+        case BLACK_KING:    result='k'; break;
         default:
             CH_ERROR("bad cpiece_type: %i", p); break;
     }
@@ -345,20 +350,36 @@ unsigned char *str;
 #ifdef EXTRA_DEBUG
 static void debug_bitboard(int64 a) {
 
-    char            *str = (char *) palloc(BOARD_SIZE+1);
-    int             cnt=BOARD_SIZE-1;
+    char            *str = (char *) palloc(SQUARE_MAX+1);
+    int             cnt=SQUARE_MAX-1;
     int64           b = a;
 
-    str += (BOARD_SIZE - 1);
+    str += (SQUARE_MAX - 1);
 	while (cnt >=0) {
           str[cnt] = (b & 1) + '0';
           b >>= 1;
 	     cnt--;
 	}
-	str[BOARD_SIZE] = '\0';
+	str[SQUARE_MAX] = '\0';
 	CH_DEBUG5("bitboard: %ld: |%s|", a, str);
 }
 #endif
+
+static void debug_bits(int64 a, unsigned char bits) {
+
+    char            *str = (char *) palloc(bits+1);
+    int             cnt=bits-1;
+    int64           b = a;
+
+    str += (bits- 1);
+	while (cnt >=0) {
+          str[cnt] = (b & 1) + '0';
+          b >>= 1;
+	     cnt--;
+	}
+	str[bits] = '\0';
+	CH_DEBUG5("bitboard: %ld: |%s|", a, str);
+}
  
 
 /*
@@ -418,14 +439,14 @@ static char _cfile_in(char f) /*{{{*/
     return f - 'a';
 }
 
-    Datum
+Datum
 square_to_cfile(PG_FUNCTION_ARGS)
 {
     char 			s = PG_GETARG_CHAR(0);
     PG_RETURN_CHAR(TO_FILE(s));
 }
 
-    Datum
+Datum
 cfile_in(PG_FUNCTION_ARGS)
 {
     char 			*str = PG_GETARG_CSTRING(0);
@@ -434,7 +455,7 @@ cfile_in(PG_FUNCTION_ARGS)
     PG_RETURN_CHAR(_cfile_in(str[0]));
 }
 
-    Datum
+Datum
 cfile_out(PG_FUNCTION_ARGS)
 {
     char 			f = PG_GETARG_CHAR(0);
@@ -949,8 +970,8 @@ static int _board_fen(const Board * b, char * str)
     CH_DEBUG5("orig fen: %s", b->orig_fen);
     CH_DEBUG5("piece count: %i", b->pcount);
 #endif
-    for (i=BOARD_SIZE-1; i>=0; i--) {
-        if (j >= MAX_FEN) {
+    for (i=SQUARE_MAX-1; i>=0; i--) {
+        if (j >= FEN_MAX) {
 #ifdef EXTRA_DEBUG
             CH_ERROR("internal error: fen is too long; original fen:'%s'", b->orig_fen);
 #else 
@@ -1097,7 +1118,7 @@ board_hash(PG_FUNCTION_ARGS)
 {
 
 	const Board     *b = (Board *) PG_GETARG_POINTER(0);
-	char            str[MAX_FEN];
+	char            str[FEN_MAX];
 
 	_board_fen(b, str);
 	PG_RETURN_INT64(_sdbm_hash(str));
@@ -1112,16 +1133,16 @@ board_in(PG_FUNCTION_ARGS)
 {
     char 			*str = PG_GETARG_CSTRING(0);
     Board           *result;
-    unsigned char   c, p='\0', pieces[MAX_PIECES];
+    unsigned char   c, p='\0', pieces[PIECES_MAX];
     int64           bitboard=0;
-    int             i=0, j=BOARD_SIZE-1, k=0, s;
+    int             i=0, j=SQUARE_MAX-1, k=0, s;
     bool            done=false, wk=false, wq=false, bk=false, bq=false;
     char            enpassant=-1, whitesgo=-1;
     size_t          s1, s2;
 
-    if (strlen(str) > MAX_FEN)
+    if (strlen(str) > FEN_MAX)
         CH_ERROR("fen string too long");
-    memset(pieces, 0, MAX_PIECES);
+    memset(pieces, 0, PIECES_MAX);
 
     // fast forward to move side
     while (str[i] != '\0') {
@@ -1214,7 +1235,7 @@ board_in(PG_FUNCTION_ARGS)
                           CH_ERROR("unkdown character in fen '%c'", c);
                           break;
         }
-        if (k>MAX_PIECES)
+        if (k>PIECES_MAX)
             CH_ERROR("too many pieces in fen");
         i++;
         if (done) 
@@ -1262,7 +1283,7 @@ board_out(PG_FUNCTION_ARGS)
 {
 
     const Board     *b = (Board *) PG_GETARG_POINTER(0);
-    char            str[MAX_FEN], n;
+    char            str[FEN_MAX], n;
     char            *result;
 
     n = _board_fen(b, str);
@@ -1362,3 +1383,63 @@ not(PG_FUNCTION_ARGS)
 
 
 /*}}}*/
+/********************************************************
+ * 		piecesquare
+ ********************************************************/
+
+Datum
+piecesquare_in(PG_FUNCTION_ARGS)
+{
+	char 		    	*str = PG_GETARG_CSTRING(0);
+    unsigned short      result=0;
+	
+	if (strlen(str) != 3)
+		BAD_TYPE_IN("piecesquare", str);
+	
+	SET_PS(result, _cpiece_type_in(str[0]), _square_in(str[1], str[2]));
+    //debug_bits(result, 16);
+
+	PG_RETURN_INT16(result);
+}
+
+Datum
+piecesquare_out(PG_FUNCTION_ARGS)
+{
+	unsigned short  ps = PG_GETARG_UINT16(0);
+	char			*result = (char *) palloc(4);
+    char            square, piece;
+
+    square = GET_PS_SQUARE(ps);
+    if (square < 0 || square >= SQUARE_MAX)
+        BAD_TYPE_OUT("piecesquare", ps);
+    piece = GET_PS_PIECE(ps);
+    if (piece < 0 || piece >= CPIECE_MAX)
+        BAD_TYPE_OUT("piecesquare", ps);
+
+	result[0] = _cpiece_type_char(piece);
+	result[1] = CHAR_CFILE(square);
+	result[2] = CHAR_RANK(square);
+	result[3] = '\0';
+	PG_RETURN_CSTRING(result);
+}
+
+Datum
+piecesquare_square(PG_FUNCTION_ARGS)
+{
+	uint16			ps = PG_GETARG_UINT16(0);
+	PG_RETURN_CHAR((char)GET_PS_SQUARE(ps));
+}
+
+
+Datum
+piecesquare_piece(PG_FUNCTION_ARGS)
+{
+	uint16			ps = PG_GETARG_UINT16(0);
+	PG_RETURN_CHAR((char)GET_PS_PIECE(ps));
+}
+/*
+const int *data = array.data(); // C array
+Datum *d = (Datum *) palloc(sizeof(Datum) * size);
+for (int i = 0; i < size; i++) d[i] = Int32GetDatum(data[i]);
+ArrayType *a = construct_array(d, size, INT4OID, sizeof(int4), true, 'i');
+*/

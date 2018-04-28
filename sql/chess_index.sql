@@ -352,6 +352,31 @@ FUNCTION        1       hash_square(piece);
 
 /*}}}*/
 /****************************************************************************
+-- piecesquare
+****************************************************************************/
+CREATE FUNCTION piecesquare_in(cstring)/*{{{*/
+RETURNS piecesquare AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION piecesquare_out(piecesquare)
+RETURNS cstring AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+
+CREATE TYPE piecesquare(
+     INPUT          = piecesquare_in
+    ,OUTPUT         = piecesquare_out
+    ,STORAGE        = PLAIN
+    ,LIKE           = int2
+);
+
+CREATE FUNCTION piecesquare_square(piecesquare)
+RETURNS square AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+CREATE CAST (piecesquare as square) WITH FUNCTION piecesquare_square;
+
+CREATE FUNCTION piecesquare_piece(piecesquare)
+RETURNS piece AS '$libdir/chess_index' LANGUAGE C IMMUTABLE STRICT;
+CREATE CAST (piecesquare as piece) WITH FUNCTION piecesquare_piece;
+
+/*}}}*/
+/****************************************************************************
 -- board: displays as fen, holds position
  ****************************************************************************/
 /*{{{*/
